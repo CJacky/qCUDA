@@ -214,18 +214,18 @@ static void kfree_gpa(uint64_t pa, uint32_t size)
 // Send VirtuiHMCmd to virtio device
 // @req: struct include command and arguments
 // if the function is corrent, it return 0. otherwise, is -1
-static int qcu_misc_send_cmd(VirtioHMArg *req)
+static int qcu_misc_send_cmd(VirtioQCArg *req)
 {
 	struct scatterlist *sgs[2], req_sg, res_sg;
 	unsigned int len;
 	int err;
-	VirtioHMArg *res;
+	VirtioQCArg *res;
 
-	res = kmalloc_safe(sizeof(VirtioHMArg));
-	memcpy(res, req, sizeof(VirtioHMArg));
+	res = kmalloc_safe(sizeof(VirtioQCArg));
+	memcpy(res, req, sizeof(VirtioQCArg));
 
-	sg_init_one(&req_sg, req, sizeof(VirtioHMArg));
-	sg_init_one(&res_sg, res, sizeof(VirtioHMArg));
+	sg_init_one(&req_sg, req, sizeof(VirtioQCArg));
+	sg_init_one(&res_sg, res, sizeof(VirtioQCArg));
 
 	sgs[0] = &req_sg;
 	sgs[1] = &res_sg;
@@ -250,16 +250,19 @@ static int qcu_misc_send_cmd(VirtioHMArg *req)
 out:
 	spin_unlock(&qcu->lock);
 
-	memcpy(req, res, sizeof(VirtioHMArg));
+	memcpy(req, res, sizeof(VirtioQCArg));
 	kfree(res);
 
 	return err;
 }
 
-int qcu_cudaRegisterFatBinary(VirtioHMArg *arg)
+int qcu_cudaRegisterFatBinary(VirtioQCArg *arg)
 {	// no extra parameters
 	time_begin();
+	time_reset();
 	cjPrint("\n");
+
+	time_reset();
 
 	qcu_misc_send_cmd(arg);
 
@@ -267,7 +270,7 @@ int qcu_cudaRegisterFatBinary(VirtioHMArg *arg)
 	return arg->cmd;
 }
 
-int qcu_cudaUnregisterFatBinary(VirtioHMArg *arg)
+int qcu_cudaUnregisterFatBinary(VirtioQCArg *arg)
 {	// no extra parameters
 	time_begin();
 	cjPrint("\n");
@@ -275,10 +278,11 @@ int qcu_cudaUnregisterFatBinary(VirtioHMArg *arg)
 	qcu_misc_send_cmd(arg);
 
 	time_add( qcu_TimeUnFatbin, time_end() );
+	time_print();
 	return arg->cmd;
 }
 
-int qcu_cudaRegisterFunction(VirtioHMArg *arg)
+int qcu_cudaRegisterFunction(VirtioQCArg *arg)
 {	// pA: fatBin
 	// pB: functrion name
 	time_begin();
@@ -296,7 +300,7 @@ int qcu_cudaRegisterFunction(VirtioHMArg *arg)
 	return arg->cmd;
 }
 
-int qcu_cudaLaunch(VirtioHMArg *arg)
+int qcu_cudaLaunch(VirtioQCArg *arg)
 {	// pA: cuda kernel configuration
 	// pB: cuda kernel parameters
 	time_begin();
@@ -314,7 +318,7 @@ int qcu_cudaLaunch(VirtioHMArg *arg)
 	return arg->cmd;
 }
 
-int qcu_cudaMalloc(VirtioHMArg *arg)
+int qcu_cudaMalloc(VirtioQCArg *arg)
 {	// pA: pointer of devPtr
 	time_begin();
 	cjPrint("\n");
@@ -325,7 +329,7 @@ int qcu_cudaMalloc(VirtioHMArg *arg)
 	return arg->cmd;
 }
 
-int qcu_cudaFree(VirtioHMArg *arg)
+int qcu_cudaFree(VirtioQCArg *arg)
 {	// pA: devPtr address
 	time_begin();
 	cjPrint("\n");
@@ -336,7 +340,28 @@ int qcu_cudaFree(VirtioHMArg *arg)
 	return arg->cmd;
 }
 
-int qcu_cudaMemcpy(VirtioHMArg *arg)
+int qcu_cudaMemcpyHostToDevice(VirtioQCArg *arg)
+{	//pA: dst pointer 
+	//pB: src pointer and size
+	time_begin();
+
+	cjPrint("\n");
+
+	cjPrint("pA= %p ,size= %u ,pB= %p, size= %u ,kind= %s\n", 
+			(void*)arg->pA, arg->pASize, (void*)arg->pB, arg->pBSize, "H2D");
+
+	arg->pA = user_to_gpa(arg->pA, arg->pASize); // device
+	arg->pB = user_to_gpa(arg->pB, arg->pBSize); // host
+
+	qcu_misc_send_cmd(arg);
+
+	kfree_gpa(arg->pB, arg->pBSize);
+
+	time_add( qcu_TimeMemcpyH2D, time_end() );
+	return arg->cmd;
+}
+
+int qcu_cudaMemcpyDeviceToHost(VirtioQCArg *arg)
 {	//pA: dst pointer 
 	//pB: src pointer and size
 	void* u_dst = NULL;
@@ -345,38 +370,34 @@ int qcu_cudaMemcpy(VirtioHMArg *arg)
 	cjPrint("\n");
 
 	cjPrint("pA= %p ,size= %u ,pB= %p, size= %u ,kind= %s\n", 
-			(void*)arg->pA, arg->pASize, (void*)arg->pB, arg->pBSize,
-			(arg->flag==1)? "H2D":"D2H");
+			(void*)arg->pA, arg->pASize, (void*)arg->pB, arg->pBSize, "D2H");
 
-	if( arg->flag == 1 )
-	{
-		arg->pA = user_to_gpa(arg->pA, arg->pASize); // device
-		arg->pB = user_to_gpa(arg->pB, arg->pBSize); // host
-	}
-	else  // arg->flag == 2
-	{
-		u_dst = (void*)arg->pA;
-		arg->pA = user_to_gpa(      0, arg->pASize); // host
-		arg->pB = user_to_gpa(arg->pB, arg->pBSize); // device
-	}
+	u_dst = (void*)arg->pA;
+	arg->pA = user_to_gpa(      0, arg->pASize); // host
+	arg->pB = user_to_gpa(arg->pB, arg->pBSize); // device
 
 	qcu_misc_send_cmd(arg);
 
-	if( arg->flag == 1 )
-	{//cudaMemcpyHostToDevice:   device, host
-		kfree_gpa(arg->pB, arg->pBSize);
-	}
-	else // arg->flag == 2
-	{//cudaMemcpyDeviceToHost:  host, device
-		gpa_to_user(u_dst, arg->pA, arg->pASize);
-		kfree_gpa(arg->pA, arg->pASize);
-	}
+	gpa_to_user(u_dst, arg->pA, arg->pASize);
+	kfree_gpa(arg->pA, arg->pASize);
 
-	time_add( qcu_TimeMemcpy, time_end() );
+	time_add( qcu_TimeMemcpyD2H, time_end() );
 	return arg->cmd;
 }
 
-static int qcu_misc_write(VirtioHMArg *arg)
+int qcu_cudaMemcpy(VirtioQCArg *arg)
+{
+	if( arg->flag == 1 )
+	{
+		return qcu_cudaMemcpyHostToDevice(arg);
+	}
+	else  // arg->flag == 2
+	{
+		return qcu_cudaMemcpyDeviceToHost(arg);
+	}
+}
+
+static int qcu_misc_write(VirtioQCArg *arg)
 {	// pA: user src pointer and size
 
 	arg->pA = user_to_gpa(arg->pA, arg->pASize);
@@ -385,7 +406,7 @@ static int qcu_misc_write(VirtioHMArg *arg)
 	return arg->cmd;
 }
 
-static int qcu_misc_read(VirtioHMArg *arg)
+static int qcu_misc_read(VirtioQCArg *arg)
 {	// pA: user buffer
 
 	void *u_dst = NULL;
@@ -403,11 +424,11 @@ static int qcu_misc_read(VirtioHMArg *arg)
 // this function reture cudaError_t.
 static long qcu_misc_ioctl(struct file *filp, unsigned int _cmd, unsigned long _arg)
 {
-	VirtioHMArg *arg;
+	VirtioQCArg *arg;
 	int err;
 
-	arg = kzalloc_safe(sizeof(VirtioHMArg));
-	copy_from_user_safe(arg, (void*)_arg, sizeof(VirtioHMArg));
+	arg = kzalloc_safe(sizeof(VirtioQCArg));
+	copy_from_user_safe(arg, (void*)_arg, sizeof(VirtioQCArg));
 	//cjPrint("_arg= %p, arg= %p\n", (void*)_arg, arg);
 
 	arg->cmd = _cmd;
@@ -415,44 +436,44 @@ static long qcu_misc_ioctl(struct file *filp, unsigned int _cmd, unsigned long _
 
 	switch(arg->cmd)
 	{
-		case VIRTHM_CMD_WRITE:
-			//cjPrint("VIRTHM_cudaMalloc, rnd= %d\n", cmd->rnd);
+		case VIRTQC_CMD_WRITE:
+			//cjPrint("VIRTQC_cudaMalloc, rnd= %d\n", cmd->rnd);
 			err = (int)qcu_misc_write(arg);
 			break;
 
-		case VIRTHM_CMD_READ:
-			//cjPrint("VIRTHM_cudaMalloc, rnd= %d\n", cmd->rnd);
+		case VIRTQC_CMD_READ:
+			//cjPrint("VIRTQC_cudaMalloc, rnd= %d\n", cmd->rnd);
 			err = (int)qcu_misc_read(arg);
 			break;
 
-		case VIRTHM_cudaRegisterFatBinary:
+		case VIRTQC_cudaRegisterFatBinary:
 			qcu_cudaRegisterFatBinary(arg);
 			break;
 
-		case VIRTHM_cudaUnregisterFatBinary:
+		case VIRTQC_cudaUnregisterFatBinary:
 			qcu_cudaUnregisterFatBinary(arg);
 			break;
 
-		case VIRTHM_cudaRegisterFunction:
+		case VIRTQC_cudaRegisterFunction:
 			qcu_cudaRegisterFunction(arg);
 			break;
 
-		case VIRTHM_cudaLaunch:
+		case VIRTQC_cudaLaunch:
 			qcu_cudaLaunch(arg);
 			break;
 
-		case VIRTHM_cudaMalloc:
-			//cjPrint("VIRTHM_cudaMalloc, rnd= %d\n", cmd->rnd);
+		case VIRTQC_cudaMalloc:
+			//cjPrint("VIRTQC_cudaMalloc, rnd= %d\n", cmd->rnd);
 			err = qcu_cudaMalloc(arg);
 			break;
 
-		case VIRTHM_cudaMemcpy:
-			//cjPrint("VIRTHM_cudaMemcpy, rnd= %d\n", cmd->rnd);
+		case VIRTQC_cudaMemcpy:
+			//cjPrint("VIRTQC_cudaMemcpy, rnd= %d\n", cmd->rnd);
 			err = qcu_cudaMemcpy(arg);
 			break;
 
-		case VIRTHM_cudaFree:
-			//cjPrint("VIRTHM_cudaFree, rnd= %d\n", cmd->rnd);
+		case VIRTQC_cudaFree:
+			//cjPrint("VIRTQC_cudaFree, rnd= %d\n", cmd->rnd);
 			err = qcu_cudaFree(arg);
 			break;
 
@@ -461,7 +482,7 @@ static long qcu_misc_ioctl(struct file *filp, unsigned int _cmd, unsigned long _
 			break;
 	}
 
-	copy_to_user_safe((void*)_arg, arg, sizeof(VirtioHMArg));
+	copy_to_user_safe((void*)_arg, arg, sizeof(VirtioQCArg));
 
 	err = arg->cmd;
 	kfree(arg);
@@ -502,7 +523,7 @@ static struct miscdevice qcu_misc_driver = {
 static void qcu_virtio_cmd_vq_cb(struct virtqueue *vq)
 {
 	/*
-	   VirtioHMArg *cmd;
+	   VirtioQCArg *cmd;
 	   unsigned int len;
 
 	   while( (cmd = virtqueue_get_buf(vq, &len))!=NULL ){	
@@ -595,7 +616,7 @@ static void qcu_virtio_remove(struct virtio_device *vdev)
 static unsigned int features[] = {};
 
 static struct virtio_device_id id_table[] = {
-	{ VIRTIO_ID_QCUDA, VIRTIO_DEV_ANY_ID },
+	{ VIRTIO_ID_QC, VIRTIO_DEV_ANY_ID },
 	{ 0 },
 };
 

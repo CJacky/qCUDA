@@ -3,13 +3,13 @@ CUDA_INC=/usr/local/cuda/include
 
 LIB=libcudart
 
-all: lib
+all: lib link
 
 lib: $(LIB).c
 	gcc -c -Wall -Werror -fpic -I$(CUDA_INC) $(LIB).c
 	gcc -shared -o $(LIB).so $(LIB).o
 
-linkin: 
+link: 
 	sudo cp $(LIB).so /usr/local/lib/
 	sudo ln -sf $(LIB).so /usr/local/lib/libcudart.so.7.5
 	sudo ldconfig

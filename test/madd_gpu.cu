@@ -51,14 +51,6 @@ int main(int argc, char* argv[])
 	size_t i, j;
 	int *A_h, *A_d;
 	int *B_h, *B_d;
-#if DUMP_FILE
-	FILE *f;
-	if( n>=10 || x>=30 || y>=30){
-		f = fopen("madd_gpu_out", "w");
-	}else{
-		f = stdout;
-	}
-#endif
 
 	n = (argc>=2)? atoi(argv[1]):2;
 	x = (argc>=3)? atoi(argv[2]):3;
@@ -79,9 +71,6 @@ int main(int argc, char* argv[])
 
 	// copy matrix from host to device
 	for(j=0; j<x*y; j++) A_h[j] = rand()%10;
-#if DUMP_FILE
-	print_matrix(A_h, x, y, f);
-#endif
 	cudaMemcpy(A_d, A_h, x*y*sizeof(int), cudaMemcpyHostToDevice);
 
 	dim3 threads(32, 32);
@@ -90,15 +79,13 @@ int main(int argc, char* argv[])
 	for(i=1; i<n; i++)
 	{
 		for(j=0; j<x*y; j++) B_h[j] = rand()%10;
-#if DUMP_FILE
-		print_matrix(B_h, x, y, f);
-#endif
 		cudaMemcpy(B_d, B_h, x*y*sizeof(int), cudaMemcpyHostToDevice);
 		matrixAdd <<< blocks, threads >>>(A_d, B_d, x, y);
 	}
 
 	cudaMemcpy(A_h, A_d, x*y*sizeof(int), cudaMemcpyDeviceToHost);
 #if DUMP_FILE
+	FILE *f = fopen("madd_gpu_out", "w");
 	print_matrix(A_h, x, y, f);
 	fclose(f);
 #endif

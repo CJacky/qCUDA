@@ -1,4 +1,4 @@
-DUMP_FILE=0
+DUMP_FILE=1
 NVFLAGS=-arch sm_35
 
 RW=normal_rw

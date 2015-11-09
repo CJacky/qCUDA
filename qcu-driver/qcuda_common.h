@@ -8,9 +8,11 @@
 #ifdef __KERNEL__
 	#include <linux/timekeeping.h>
 	#define qcu_gettime(t) do_gettimeofday(t)
+	#define print printk
 #else
 	#include <sys/time.h>
 	#define qcu_gettime(t) gettimeofday (t, NULL)
+	#define print printf
 #endif
 
 uint64_t qcu_TimeRegFatbin;
@@ -19,7 +21,8 @@ uint64_t qcu_TimeRegFunc;
 uint64_t qcu_TimeLaunch;
 uint64_t qcu_TimeMalloc;
 uint64_t qcu_TimeFree;
-uint64_t qcu_TimeMemcpy;
+uint64_t qcu_TimeMemcpyH2D;
+uint64_t qcu_TimeMemcpyD2H;
 
 #define time_reset() \
 	qcu_TimeRegFatbin = 0; \
@@ -28,7 +31,19 @@ uint64_t qcu_TimeMemcpy;
 	qcu_TimeLaunch = 0; \
 	qcu_TimeFree = 0; \
 	qcu_TimeUnFatbin = 0; \
-	qcu_TimeMemcpy = 0;
+	qcu_TimeMemcpyH2D = 0; \
+	qcu_TimeMemcpyD2H = 0;
+
+#define time_print() \
+	print("%s\t%llu\n", "cudaRegisterFatBinary", (unsigned long long)qcu_TimeRegFatbin); \
+	print("%s\t%llu\n", "cudaRegisterFunction", (unsigned long long)qcu_TimeRegFunc); \
+	print("%s\t%llu\n", "cudaMalloc", (unsigned long long)qcu_TimeMalloc); \
+	print("%s\t%llu\n", "cudaMemcpyH2D", (unsigned long long)qcu_TimeMemcpyH2D); \
+	print("%s\t%llu\n", "cudaMemcpyD2H", (unsigned long long)qcu_TimeMemcpyD2H); \
+	print("%s\t%llu\n", "cudaLaunch", (unsigned long long)qcu_TimeLaunch); \
+	print("%s\t%llu\n", "cudaFree", (unsigned long long)qcu_TimeFree); \
+	print("%s\t%llu\n", "cudaUnregisterFatBinary", (unsigned long long)qcu_TimeUnFatbin); \
+	print("\n\n");
 
 #define time_begin() \
 	struct timeval timeval_begin; \
@@ -45,16 +60,12 @@ uint64_t qcu_TimeMemcpy;
 #define time_add(v, t) \
 	v += t
 
-#define time_print(t) \
-	printk("%s\t%llu\n", __func__, (unsigned long long)t)
-
-
 #else // MEAS_TIME
 
 #define time_reset()
 #define time_begin()
 #define time_end()
-#define time_print(t)
+#define time_print()
 #define time_add(v, t) 
 
 #endif //MEAS_TIME

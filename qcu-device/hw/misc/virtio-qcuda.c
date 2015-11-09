@@ -65,6 +65,7 @@ static void __checkCudaErrors(CUresult err, const int line)
 static void qcu_cudaRegisterFatBinary(VirtioQCArg *arg)
 {
 	time_begin();
+	time_reset();
 	cjPrint("\n");
 
 	checkCudaErrors( cuInit(0) );
@@ -85,6 +86,7 @@ static void qcu_cudaUnregisterFatBinary(VirtioQCArg *arg)
 	cuCtxDestroy(cuda_context);
 	
 	time_add( qcu_TimeUnFatbin , time_end() );
+	time_print();
 }
 
 static void qcu_cudaRegisterFunction(VirtioQCArg *arg)
@@ -129,6 +131,7 @@ static void qcu_cudaMemcpyHostToDevice(VirtioQCArg *arg)
 	void *src;
 	uint64_t *gpa_array;
 	uint32_t size, len, i;
+	time_begin();
 
 	dst = (CUdeviceptr)arg->pA;
 	size = arg->pBSize;
@@ -152,6 +155,7 @@ static void qcu_cudaMemcpyHostToDevice(VirtioQCArg *arg)
 	}
 
 	cjPrint("devPtr= %p, size= %u\n", (void*)dst, size);
+	time_add( qcu_TimeMemcpyH2D , time_end() );
 }
 
 static void qcu_cudaMemcpyDeviceToHost(VirtioQCArg *arg)
@@ -160,6 +164,7 @@ static void qcu_cudaMemcpyDeviceToHost(VirtioQCArg *arg)
 	CUdeviceptr src;
 	uint64_t *gpa_array;
 	uint32_t size, len, i;
+	time_begin();
 
 	src = (CUdeviceptr)arg->pB;
 	size = arg->pASize;
@@ -183,18 +188,15 @@ static void qcu_cudaMemcpyDeviceToHost(VirtioQCArg *arg)
 	}
 
 	cjPrint("size= %u\n", size);
+	time_add( qcu_TimeMemcpyD2H , time_end() );
 }
 
 static void qcu_cudaMemcpy(VirtioQCArg *arg)
 {
-	time_begin();
-	
 	if( arg->flag == 1)
 		qcu_cudaMemcpyHostToDevice(arg);
 	else
 		qcu_cudaMemcpyDeviceToHost(arg);
-	
-	time_add( qcu_TimeMemcpy , time_end() );
 }
 
 static void qcu_cudaFree(VirtioQCArg *arg)

@@ -13,7 +13,7 @@
 #include <__cudaFatFormat.h>
 #include <fatBinaryCtl.h>
 
-#define dev_path "/dev/virthm"
+#define dev_path "/dev/qcuda"
 
 #if 0
 #define cjPrint(fmt, arg...) printf(fmt, ##arg)
@@ -81,7 +81,7 @@ void** __cudaRegisterFatBinary(void *fatCubin)
 		exit(EXIT_FAILURE);
 	}
 
-	ioctl(fd, VIRTHM_cudaRegisterFatBinary, NULL);
+	ioctl(fd, VIRTQC_cudaRegisterFatBinary, NULL);
 	
 	// the pointer value is cubin ELF entry point
 	return fatCubinHandle;
@@ -93,7 +93,7 @@ void __cudaUnregisterFatBinary(void **fatCubinHandle)
 	cjPrint("%s\n", __func__);
 	cjPrint("    fatCubinHandle= %p, value= %p\n", fatCubinHandle, *fatCubinHandle);
 
-	ioctl(fd, VIRTHM_cudaUnregisterFatBinary, NULL);
+	ioctl(fd, VIRTQC_cudaUnregisterFatBinary, NULL);
 	free(fatCubinHandle);
 	close(fd);
 }
@@ -111,7 +111,7 @@ void __cudaRegisterFunction(
 		int     *wSize
 		)
 {
-	VirtioHMArg *arg;
+	VirtioQCArg *arg;
 	computeFatBinaryFormat_t fatBinHeader;
 
 	cjPrint("%s\n", __func__);
@@ -136,7 +136,7 @@ void __cudaRegisterFunction(
 	if(wSize)cjPrint("    wSize= %d\n", *wSize);
 	else	 cjPrint("    wSize is NULL\n");
 
-	arg = zalloc(sizeof(VirtioHMArg));
+	arg = zalloc(sizeof(VirtioQCArg));
 	fatBinHeader = (computeFatBinaryFormat_t)(*fatCubinHandle);
 
 	ptr( arg->pA , fatBinHeader, fatBinHeader->fatSize);
@@ -145,23 +145,23 @@ void __cudaRegisterFunction(
 //	cjPrint("pA= %p, pASize= %u, pB= %p, pBSize= %u\n", 
 //			(void*)arg->pA, arg->pASize, (void*)arg->pB, arg->pBSize);
 
-	ioctl(fd, VIRTHM_cudaRegisterFunction, arg);
+	ioctl(fd, VIRTQC_cudaRegisterFunction, arg);
 
 	free(arg);
 }
 
 cudaError_t cudaMalloc(void** devPtr, size_t size)
 {
-	VirtioHMArg *arg;
+	VirtioQCArg *arg;
 
 	cjPrint("%s\n", __func__);
 
-	arg = zalloc(sizeof(VirtioHMArg));
+	arg = zalloc(sizeof(VirtioQCArg));
 
 	ptr( arg->pA, 0,  0);
 	arg->flag = size;
 
-	ioctl(fd, VIRTHM_cudaMalloc, arg);
+	ioctl(fd, VIRTQC_cudaMalloc, arg);
 
 	*devPtr = (void*)arg->pA;
 	
@@ -173,15 +173,15 @@ cudaError_t cudaMalloc(void** devPtr, size_t size)
 
 cudaError_t cudaFree(void* devPtr)
 {
-	VirtioHMArg *arg;
+	VirtioQCArg *arg;
 
-	arg = zalloc(sizeof(VirtioHMArg));
+	arg = zalloc(sizeof(VirtioQCArg));
 
 	cjPrint("%s\n", __func__);
 
 	ptr( arg->pA, devPtr, 0);
 
-	ioctl(fd, VIRTHM_cudaFree, arg);
+	ioctl(fd, VIRTQC_cudaFree, arg);
 
 	cjPrint("    devPtr= %p\n", (void*)arg->pA);
 
@@ -195,8 +195,8 @@ cudaError_t cudaMemcpy(
 		size_t count,  
 		enum cudaMemcpyKind kind)
 {
-	VirtioHMArg *arg;
-	arg = zalloc(sizeof(VirtioHMArg));
+	VirtioQCArg *arg;
+	arg = zalloc(sizeof(VirtioQCArg));
 
 	cjPrint("%s\n", __func__);
 //	cjPrint("dst= %p , src= %p ,size= %u\n", dst, src, size);
@@ -220,7 +220,7 @@ cudaError_t cudaMemcpy(
 		return cudaErrorInvalidValue;
 	}
 
-	ioctl(fd, VIRTHM_cudaMemcpy, arg);
+	ioctl(fd, VIRTQC_cudaMemcpy, arg);
 
 	free(arg);
 	return cudaSuccess;
@@ -305,15 +305,15 @@ cudaError_t cudaSetupArgument(
 
 cudaError_t cudaLaunch(const void *func)
 {
-	VirtioHMArg *arg;
-	arg = zalloc(sizeof(VirtioHMArg));
+	VirtioQCArg *arg;
+	arg = zalloc(sizeof(VirtioQCArg));
 
 	cjPrint("%s\n", __func__);
 
 	ptr( arg->pA, cudaKernelConf, 7*sizeof(uint32_t));
 	ptr( arg->pB, cudaKernelPara, cudaParaNum*sizeof(uint64_t));
 
-	ioctl(fd, VIRTHM_cudaLaunch, arg);
+	ioctl(fd, VIRTQC_cudaLaunch, arg);
 	
 	cudaParaNum = 0;
 

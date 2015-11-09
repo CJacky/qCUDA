@@ -86,20 +86,11 @@ int main(int argc, char* argv[])
 	size_t i, j;
 	unsigned int threads[3], blocks[3], sharedMem;
 	void* para[4];
-#if DUMP_FILE
-	FILE *f;
-	if( n>=10 || x>=30 || y>=30){
-		f = fopen("madd_gpu_drv_out", "w");
-	}else{
-		f = stdout;
-	}
-#endif
 
 	initCUDA();
 	n = (argc>=2)? atoi(argv[1]):2;
 	x = (argc>=3)? atoi(argv[2]):3;
 	y = (argc>=4)? atoi(argv[3]):3;
-
 
 	if( x<=0 || y<=0 || n<2){
 		printf("dim error, n= %d, x= %d, y= %d\n", n, x, y);
@@ -113,9 +104,6 @@ int main(int argc, char* argv[])
 	checkCudaErrors( cuMemAlloc( &B_d, x*y*sizeof(int)));	
 	
 	for(j=0; j<x*y; j++) A_h[j] = rand()%10;
-#if DUMP_FILE
-	print_matrix(A_h, x, y, f);
-#endif
 	checkCudaErrors( cuMemcpyHtoD( A_d, A_h, x*y*sizeof(int)) );
 	
 	threads[0] = 32;
@@ -141,9 +129,6 @@ int main(int argc, char* argv[])
 	for(i=1; i<n; i++)
 	{
 		for(j=0; j<x*y; j++) B_h[j] = rand()%10;
-#if DUMP_FILE
-		print_matrix(B_h, x, y, f);
-#endif
 		checkCudaErrors( cuMemcpyHtoD( B_d, B_h, x*y*sizeof(int)) );
 		checkCudaErrors( cuLaunchKernel(cuda_function, 
 					blocks [0], blocks [1], blocks [2], 
@@ -152,6 +137,7 @@ int main(int argc, char* argv[])
 	}
 	checkCudaErrors( cuMemcpyDtoH( A_h, A_d, x*y*sizeof(int)) );
 #if DUMP_FILE
+	FILE *f = fopen("madd_gpu_drv_out", "w");
 	print_matrix(A_h, x, y, f);
 	fclose(f);
 #endif

@@ -38,14 +38,6 @@ int main(int argc, char* argv[])
 	int *A, *B;
 	int x, y, n; // matrix dim  xy, yz, xz
 	size_t i, j;
-#if DUMP_FILE
-	FILE *f;
-	if( n>=10 || x>=30 || y>=30){
-		f = fopen("madd_cpu_out", "w");
-	}else{
-		f = stdout;
-	}
-#endif
 
 	n = (argc>=2)? atoi(argv[1]):2;
 	x = (argc>=3)? atoi(argv[2]):3;
@@ -60,19 +52,14 @@ int main(int argc, char* argv[])
 	B = (int*)malloc( x*y*sizeof(int));
 	
 	for(j=0; j<x*y; j++) A[j] = rand()%10;
-#if DUMP_FILE
-	print_matrix(A, x, y, f);
-#endif
 
 	for(i=1; i<n; i++)
 	{
 		for(j=0; j<x*y; j++) B[j] = rand()%10;
-#if DUMP_FILE
-		print_matrix(B, x, y, f);
-#endif
 		matrixAdd(A, B, x, y);
 	}
 #if DUMP_FILE
+	FILE *f = fopen("madd_cpu_out", "w");
 	print_matrix(A, x, y, f);
 	fclose(f);
 #endif
