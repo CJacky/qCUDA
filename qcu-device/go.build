@@ -1,0 +1,7 @@
+#!/bin/bash
+set -x
+
+./configure --prefix=/opt/qemu-2.4.0 --target-list=x86_64-softmmu --enable-kvm --disable-xen --enable-debug --enable-debug-info --enable-cuda
+make -j 16
+sudo make install
+
