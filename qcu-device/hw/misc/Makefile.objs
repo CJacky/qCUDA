@@ -42,4 +42,3 @@ obj-$(CONFIG_PVPANIC) += pvpanic.o
 obj-$(CONFIG_EDU) += edu.o
 
 obj-$(CONFIG_VIRTIO) += virtio-qcuda.o
-obj-$(CONFIG_VIRTIO_PCI) += virtio-qcuda-pci.o

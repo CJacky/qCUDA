@@ -85,13 +85,39 @@ enum
 
 enum
 {
+	// Module & Execution control (driver API)
 	VIRTQC_cudaRegisterFatBinary = 200,
 	VIRTQC_cudaUnregisterFatBinary,
 	VIRTQC_cudaRegisterFunction,
 	VIRTQC_cudaLaunch,
+
+	// Memory Management (runtime API)
 	VIRTQC_cudaMalloc,
 	VIRTQC_cudaMemcpy,
 	VIRTQC_cudaFree,
+
+	// Device Management (runtime API)
+	VIRTQC_cudaGetDevice,
+	VIRTQC_cudaGetDeviceCount,
+	VIRTQC_cudaGetDeviceProperties,
+	VIRTQC_cudaSetDevice,
+	VIRTQC_cudaDeviceSynchronize,
+	VIRTQC_cudaDeviceReset,
+
+	// Version Management (runtime API)
+	VIRTQC_cudaDriverGetVersion,
+	VIRTQC_cudaRuntimeGetVersion,
+
+	// Event Management (runtime API)
+	VIRTQC_cudaEventCreate,
+	VIRTQC_cudaEventRecord,
+	VIRTQC_cudaEventSynchronize,
+	VIRTQC_cudaEventElapsedTime,
+	VIRTQC_cudaEventDestroy,
+
+	// Error Handling (runtime API)
+	VIRTQC_cudaGetLastError,
+
 };
 
 typedef struct VirtioQCArg   VirtioQCArg;

@@ -3383,7 +3383,8 @@ fi
 ##########################################
 # CUDA probe: CJacky
 if test "$cuda" = "yes" ; then
-	LIBS="-lcuda $LIBS"
+	LIBS="-lcuda -lcudart $LIBS"
+	LDFLAGS="-L/usr/local/cuda/lib64 $LDFLAGS"
 	QEMU_CFLAGS="-I/usr/local/cuda/include $QEMU_CFLAGS"
 fi
 

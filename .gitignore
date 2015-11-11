@@ -108,3 +108,4 @@ TAGS
 /test/answer/*
 /test/data/*
 /test/bandwidthTest/*
+/test/nvidia_simples/*

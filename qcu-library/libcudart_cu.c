@@ -10,20 +10,20 @@
 #include <__cudaFatFormat.h>
 #include <fatBinaryCtl.h>
 
-#include "../vhm-driver/virtio_hm.h"
+#include "../qcu-driver/qcuda_common.h"
 
-#define Errchk(ans) { DrvAssert((ans), __FILE__, __LINE__); }
-inline void DrvAssert( CUresult code, const char *file, int line)
-{
-	char *str;
-	if (code != CUDA_SUCCESS) {
-		cuGetErrorName(code, (const char**)&str);
-		printf("Error: %s , %s@%d\n", str, file, line);
-		exit(code);
-	}/* else {
-		std::cout << "Success: " << file << "@" << line << std::endl;
-		}*/
-}
+
+#if 1
+#define pfunc() printf("### %s\n", __func__)
+#else
+#define pfunc() 
+#endif
+
+#if 1
+#define ptrace(fmt, arg...) 	printf("###    "fmt, ##arg)
+#else
+#define ptrace(fmt, arg...)
+#endif
 
 void *lib = NULL;
 CUmodule mod;
@@ -37,23 +37,36 @@ dim3 blockDim;
 size_t sharedMem;
 cudaStream_t stream;
 
+#define Errchk(ans) { DrvAssert((ans), __FILE__, __LINE__); }
+inline void DrvAssert( CUresult code, const char *file, int line)
+{
+	char *str;
+	if (code != CUDA_SUCCESS) {
+		cuGetErrorName(code, (const char**)&str);
+		printf("Error: %s at %s:%d\n", str, file, line);
+		cuCtxDestroy(ctx);
+		exit(code);
+	}/* else {
+		std::cout << "Success: " << file << "@" << line << std::endl;
+		}*/
+}
+
 void** __cudaRegisterFatBinary(void *fatCubin)
 {
 	unsigned int magic = *(unsigned int*)fatCubin;
 	void **fatCubinHandle = malloc(sizeof(void*));
 
-	printf("### %s ###\n", __FILE__);
-	printf("%s\n", __func__);
-	printf("    fatCubin= %p\n", fatCubin);
+	pfunc();
+	ptrace("    fatCubin= %p\n", fatCubin);
 
 	if( magic == FATBINC_MAGIC)
 	{// fatBinaryCtl.h
 		__fatBinC_Wrapper_t *binary = (__fatBinC_Wrapper_t*)fatCubin;
-		printf("    FATBINC_MAGIC\n");
-		printf("    magic= %x\n", binary->magic);
-		printf("    version= %x\n", binary->version);
-		printf("    data= %p\n", binary->data);
-		printf("    filename_or_fatbins= %p\n", binary->filename_or_fatbins);
+		ptrace("    FATBINC_MAGIC\n");
+		ptrace("    magic= %x\n", binary->magic);
+		ptrace("    version= %x\n", binary->version);
+		ptrace("    data= %p\n", binary->data);
+		ptrace("    filename_or_fatbins= %p\n", binary->filename_or_fatbins);
 
 		// TODO
 		// add 0x50 is result of researching hexdump of binary file
@@ -71,7 +84,7 @@ magic: FATBIN_MAGIC
 		   header: fatbinary.h
 		   computeFatBinaryFormat_t binary = (computeFatBinaryFormat_t)fatCubin;
 #endif	 
-	   printf("Unrecognized CUDA FAT MAGIC 0x%x\n", magic);
+	   ptrace("Unrecognized CUDA FAT MAGIC 0x%x\n", magic);
 	   exit(1);
 	}
 
@@ -85,8 +98,8 @@ magic: FATBIN_MAGIC
 
 void __cudaUnregisterFatBinary(void **fatCubinHandle)
 {	
-	printf("%s\n", __func__);
-	printf("    handle= %p, value= %p\n", fatCubinHandle, *fatCubinHandle);
+	ptrace("%s\n", __func__);
+	ptrace("    handle= %p, value= %p\n", fatCubinHandle, *fatCubinHandle);
 
 	cuCtxDestroy(ctx);
 	free(fatCubinHandle);
@@ -105,28 +118,27 @@ void __cudaRegisterFunction(
 		int     *wSize
 		)
 {
+	pfunc();
+	ptrace("    fatCubinHandle= %p, value= %p\n", fatCubinHandle, *fatCubinHandle);
+	ptrace("    hostFun= %s (%p)\n", hostFun, hostFun);
+	ptrace("    deviceFun= %s (%p)\n", deviceFun, deviceFun);
+	ptrace("    deviceName= %s\n", deviceName);
+	ptrace("    thread_limit= %d\n", thread_limit);
 
-	printf("%s\n", __func__);
-	printf("    fatCubinHandle= %p, value= %p\n", fatCubinHandle, *fatCubinHandle);
-	printf("    hostFun= %s (%p)\n", hostFun, hostFun);
-	printf("    deviceFun= %s (%p)\n", deviceFun, deviceFun);
-	printf("    deviceName= %s\n", deviceName);
-	printf("    thread_limit= %d\n", thread_limit);
+	if(tid) ptrace("    tid= %u %u %u\n", tid->x, tid->y, tid->z);
+	else	ptrace("    tid is NULL\n");
 
-	if(tid) printf("    tid= %u %u %u\n", tid->x, tid->y, tid->z);
-	else	printf("    tid is NULL\n");
+	if(bid)	ptrace("    bid= %u %u %u\n", bid->x, bid->y, bid->z);
+	else	ptrace("    bid is NULL\n");
 
-	if(bid)	printf("    bid= %u %u %u\n", bid->x, bid->y, bid->z);
-	else	printf("    bid is NULL\n");
+	if(bDim)ptrace("    bDim= %u %u %u\n", bDim->x, bDim->y, bDim->z);
+	else	ptrace("    bDim is NULL\n");
 
-	if(bDim)printf("    bDim= %u %u %u\n", bDim->x, bDim->y, bDim->z);
-	else	printf("    bDim is NULL\n");
+	if(gDim)ptrace("    gDim= %u %u %u\n", gDim->x, gDim->y, gDim->z);
+	else	ptrace("    gDim is NULL\n");
 
-	if(gDim)printf("    gDim= %u %u %u\n", gDim->x, gDim->y, gDim->z);
-	else	printf("    gDim is NULL\n");
-
-	if(wSize)printf("    wSize= %d\n", *wSize);
-	else	 printf("    wSize is NULL\n");
+	if(wSize)ptrace("    wSize= %d\n", *wSize);
+	else	 ptrace("    wSize is NULL\n");
 
 	
 	computeFatBinaryFormat_t fatBinHeader;
@@ -135,10 +147,10 @@ void __cudaRegisterFunction(
 
 	fatBinHeader = (computeFatBinaryFormat_t)(*fatCubinHandle);
 
-	printf("    magic= %x\n", fatBinHeader->magic);
-	printf("    version= %x\n", fatBinHeader->version);
-	printf("    headerSize= %x\n", fatBinHeader->headerSize);
-	printf("    fatSize= %llx\n", fatBinHeader->fatSize);
+	ptrace("    magic= %x\n", fatBinHeader->magic);
+	ptrace("    version= %x\n", fatBinHeader->version);
+	ptrace("    headerSize= %x\n", fatBinHeader->headerSize);
+	ptrace("    fatSize= %llx\n", fatBinHeader->fatSize);
 
 	fatSize = fatBinHeader->fatSize;
 	fatBin = (char*)malloc(fatSize);
@@ -152,18 +164,21 @@ void __cudaRegisterFunction(
 
 cudaError_t cudaMalloc(void** devPtr, size_t size)
 {
+	pfunc();
 	Errchk( cuMemAlloc( (CUdeviceptr*)devPtr, size));	
 	return cudaSuccess;
 }
 
 cudaError_t cudaFree(void* devPtr)
 {
+	pfunc();
 	Errchk( cuMemFree( (CUdeviceptr)devPtr));
 	return cudaSuccess;
 }
 
 cudaError_t cudaMemcpy(void* dst, const void* src, size_t count,  enum cudaMemcpyKind kind)
 {
+	pfunc();
 	if( kind == cudaMemcpyHostToDevice)
 	{
 		Errchk( cuMemcpyHtoD((CUdeviceptr)dst, src, count) );
@@ -182,12 +197,12 @@ cudaError_t cudaConfigureCall(
 		size_t _sharedMem, 
 		cudaStream_t _stream)
 {
-	printf("%s\n", __func__);
-	printf("    gridDim= %d %d %d\n", _gridDim.x, _gridDim.y, _gridDim.z);
-	printf("    blockDim= %d %d %d\n", _blockDim.x, _blockDim.y, _blockDim.z);
-	printf("    sharedMem= %lu\n", _sharedMem);
-	printf("    stream= %p\n", (void*)_stream);
-	//printf("    size= %lu\n", sizeof(cudaStream_t));
+	pfunc();
+	ptrace("    gridDim= %d %d %d\n", _gridDim.x, _gridDim.y, _gridDim.z);
+	ptrace("    blockDim= %d %d %d\n", _blockDim.x, _blockDim.y, _blockDim.z);
+	ptrace("    sharedMem= %lu\n", _sharedMem);
+	ptrace("    stream= %p\n", (void*)_stream);
+	//ptrace("    size= %lu\n", sizeof(cudaStream_t));
 
 	memcpy(  &gridDim,   &_gridDim, sizeof(dim3));
 	memcpy( &blockDim,  &_blockDim, sizeof(dim3));
@@ -202,18 +217,18 @@ cudaError_t cudaSetupArgument(
 		size_t size, 
 		size_t offset)
 {
-	printf("%s\n", __func__);
+	pfunc();
 	switch(size)
 	{
 		case 4:
-			printf("    arg= %p, value= %u\n", arg, *(unsigned int*)arg);
+			ptrace("    arg= %p, value= %u\n", arg, *(unsigned int*)arg);
 			break;
 		case 8:
-			printf("    arg= %p, value= %llx\n", arg, *(unsigned long long*)arg);
+			ptrace("    arg= %p, value= %llx\n", arg, *(unsigned long long*)arg);
 			break;
 	}
-	printf("    size= %lu\n", size);
-	printf("    offset= %lu\n", offset);
+	ptrace("    size= %lu\n", size);
+	ptrace("    offset= %lu\n", offset);
 
 
 	/*
@@ -237,17 +252,84 @@ cudaError_t cudaLaunch(const void *func)
 		CU_LAUNCH_PARAM_END
 	};
 */
-	printf("%s\n", __func__);
-	printf("    func= %p\n", func);
-	printf("    gridDim= %d %d %d\n", gridDim.x, gridDim.y, gridDim.z);
-	printf("    blockDim= %d %d %d\n", blockDim.x, blockDim.y, blockDim.z);
-	printf("    sharedMem= %lu\n", sharedMem);
-	printf("    stream= %p\n", stream);
+	pfunc();
+	ptrace("    func= %p\n", func);
+	ptrace("    gridDim= %d %d %d\n", gridDim.x, gridDim.y, gridDim.z);
+	ptrace("    blockDim= %d %d %d\n", blockDim.x, blockDim.y, blockDim.z);
+	ptrace("    sharedMem= %lu\n", sharedMem);
+	ptrace("    stream= %p\n", stream);
 
 	Errchk( cuLaunchKernel(fun, 
 				 gridDim.x,  gridDim.y,  gridDim.z,
 				blockDim.x, blockDim.y, blockDim.z, 
-				sharedMem, NULL, paraBuf, NULL));
-
+				sharedMem, stream, paraBuf, NULL));
+	paraSize = 0;
 	return cudaSuccess;
 }
+
+//#####################################################################
+
+cudaError_t cudaGetDevice(int *device)
+{
+	pfunc();
+	Errchk( cuDeviceGet((CUdevice*)device, 0));
+	return cudaSuccess;
+}
+
+cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device)
+{	/*
+	char name[256];
+	size_t totalGlobalMem;
+	int major, minor;
+	pfunc();
+	
+	Errchk( cuDeviceGetName(name, 256, device));
+	Errchk( cuDeviceTotalMem(&totalGlobalMem, device));
+	Errchk( cuDeviceComputeCapability(&major, &minor, device));
+
+	memset(prop, 0, sizeof(struct cudaDeviceProp));
+	strcpy(prop->name, name);
+	prop->totalGlobalMem = totalGlobalMem;
+	prop->major = major;
+	prop->minor = minor;
+
+	return cudaSuccess;*/
+
+	pfunc();
+	return cudaGetDeviceProperties(prop, device);
+}
+
+cudaError_t cudaDeviceSynchronize(void) 	
+{
+	pfunc();
+	return cudaSuccess;
+}
+
+// typedef struct CUevent_st* cudaEvent_t
+// typedef struct CUevent_st* CUevent
+cudaError_t cudaEventCreate(cudaEvent_t *event)
+{
+	pfunc();
+	Errchk(cuEventCreate(event, 0));
+	return cudaSuccess;
+}
+
+cudaError_t cudaEventRecord	(cudaEvent_t event,	cudaStream_t stream)
+{
+	pfunc();
+	Errchk(cuEventRecord(event, stream));
+	return cudaSuccess;
+}
+
+cudaError_t cudaEventSynchronize(cudaEvent_t event) 
+{
+	pfunc();
+	Errchk(cuEventSynchronize(event));
+	return cudaSuccess;
+}
+
+
+
+
+
+
