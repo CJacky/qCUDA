@@ -1,7 +1,7 @@
 
 CUDA_INC=/usr/local/cuda/include
 
-LIB=libcudart_dl
+LIB=libcudart
 
 all: lib
 

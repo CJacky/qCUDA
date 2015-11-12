@@ -20,6 +20,10 @@
 
 #define error(fmt, arg...) printf("ERROR: "fmt, ##arg)
 
+#define zalloc(n) ({\
+		void *addr = malloc(n); \
+		memset(addr, 0, n); \
+		addr; })
 
 #define ptr( p , v, s)\
 	p = (uint64_t)v; \
@@ -123,11 +127,10 @@ void __cudaRegisterFunction(
 		int     *wSize
 		)
 {
-	VirtioQCArg arg;
+	VirtioQCArg *arg;
 	computeFatBinaryFormat_t fatBinHeader;
 
 	pfunc();
-	memset(&arg, 0, sizeof(VirtioQCArg));
 
 	ptrace("    fatCubinHandle= %p, value= %p\n", fatCubinHandle, *fatCubinHandle);
 	ptrace("    hostFun= %s (%p)\n", hostFun, hostFun);
@@ -150,16 +153,18 @@ void __cudaRegisterFunction(
 	if(wSize)ptrace("    wSize= %d\n", *wSize);
 	else	 ptrace("    wSize is NULL\n");
 
-	
+	arg = zalloc(sizeof(VirtioQCArg));
 	fatBinHeader = (computeFatBinaryFormat_t)(*fatCubinHandle);
 
-	ptr( arg.pA , fatBinHeader, fatBinHeader->fatSize);
-	ptr( arg.pB , deviceName  , strlen(deviceName)+1 );
+	ptr( arg->pA , fatBinHeader, fatBinHeader->fatSize);
+	ptr( arg->pB , deviceName  , strlen(deviceName)+1 );
 
 	//	ptrace("pA= %p, pASize= %u, pB= %p, pBSize= %u\n", 
-	//			(void*)arg.pA, arg.pASize, (void*)arg.pB, arg.pBSize);
+	//			(void*)arg->pA, arg->pASize, (void*)arg->pB, arg->pBSize);
 
-	ioctl(fd, VIRTQC_cudaRegisterFunction, &arg);
+	ioctl(fd, VIRTQC_cudaRegisterFunction, arg);
+
+	free(arg);
 }
 
 cudaError_t cudaConfigureCall(
@@ -241,17 +246,19 @@ cudaError_t cudaSetupArgument(
 
 cudaError_t cudaLaunch(const void *func)
 {
-	VirtioQCArg arg;
+	VirtioQCArg *arg;
 	pfunc();
-	memset(&arg, 0, sizeof(VirtioQCArg));
 	
-	ptr( arg.pA, cudaKernelConf, 7*sizeof(uint32_t));
-	ptr( arg.pB, cudaKernelPara, cudaParaNum*sizeof(uint64_t));
+	arg = zalloc(sizeof(VirtioQCArg));
 
-	ioctl(fd, VIRTQC_cudaLaunch, &arg);
+	ptr( arg->pA, cudaKernelConf, 7*sizeof(uint32_t));
+	ptr( arg->pB, cudaKernelPara, cudaParaNum*sizeof(uint64_t));
+
+	ioctl(fd, VIRTQC_cudaLaunch, arg);
 
 	cudaParaNum = 0;
-	
+
+	free(arg);
 	return cudaSuccess;
 }
 
@@ -261,37 +268,41 @@ cudaError_t cudaLaunch(const void *func)
 
 cudaError_t cudaMalloc(void** devPtr, size_t size)
 {
-	VirtioQCArg arg;
+	VirtioQCArg *arg;
 
 	pfunc();
-	memset(&arg, 0, sizeof(VirtioQCArg));
 	open_device();
 
-	ptr( arg.pA, 0,  0);
-	arg.flag = size;
+	arg = zalloc(sizeof(VirtioQCArg));
 
-	ioctl(fd, VIRTQC_cudaMalloc, &arg);
+	ptr( arg->pA, 0,  0);
+	arg->flag = size;
 
-	*devPtr = (void*)arg.pA;
+	ioctl(fd, VIRTQC_cudaMalloc, arg);
 
-	ptrace("    devPtr= %p\n", (void*)arg.pA);
+	*devPtr = (void*)arg->pA;
 
-	return (cudaError_t)arg.cmd;
+	ptrace("    devPtr= %p\n", (void*)arg->pA);
+
+	free(arg);
+	return (cudaError_t)arg->cmd;
 }
 
 cudaError_t cudaFree(void* devPtr)
 {
-	VirtioQCArg arg;
+	VirtioQCArg *arg;
 	pfunc();
-	memset(&arg, 0, sizeof(VirtioQCArg));
 
-	ptr( arg.pA, devPtr, 0);
+	arg = zalloc(sizeof(VirtioQCArg));
 
-	ioctl(fd, VIRTQC_cudaFree, &arg);
+	ptr( arg->pA, devPtr, 0);
 
-	ptrace("    devPtr= %p\n", (void*)arg.pA);
-	
-	return (cudaError_t)arg.cmd;
+	ioctl(fd, VIRTQC_cudaFree, arg);
+
+	ptrace("    devPtr= %p\n", (void*)arg->pA);
+
+	free(arg);
+	return (cudaError_t)arg->cmd;
 }
 
 cudaError_t cudaMemcpy(
@@ -300,34 +311,36 @@ cudaError_t cudaMemcpy(
 		size_t count,  
 		enum cudaMemcpyKind kind)
 {
-	VirtioQCArg arg;
+	VirtioQCArg *arg;
 	pfunc();
-	memset(&arg, 0, sizeof(VirtioQCArg));
+	
+	arg = zalloc(sizeof(VirtioQCArg));
 
 	ptrace("dst= %p , src= %p ,size= %lu\n", (void*)dst, (void*)src, count);
 
 	if( kind == cudaMemcpyHostToDevice)
 	{
-		ptr( arg.pA, dst, 0);
-		ptr( arg.pB, src, count);
-		arg.flag   = 1;
+		ptr( arg->pA, dst, 0);
+		ptr( arg->pB, src, count);
+		arg->flag   = 1;
 	}
 	else if( kind == cudaMemcpyDeviceToHost )
 	{
-		ptr( arg.pA, dst, count);
-		ptr( arg.pB, src, 0);
-		arg.flag   = 2;
+		ptr( arg->pA, dst, count);
+		ptr( arg->pB, src, 0);
+		arg->flag   = 2;
 	}
 	else
 	{
 		error("Not impletment cudaMemcpyKind\n");
-		
+		free(arg);
 		return cudaErrorInvalidValue;
 	}
 
-	ioctl(fd, VIRTQC_cudaMemcpy, &arg);
+	ioctl(fd, VIRTQC_cudaMemcpy, arg);
 
-	return (cudaError_t)arg.cmd;
+	free(arg);
+	return (cudaError_t)arg->cmd;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -336,73 +349,87 @@ cudaError_t cudaMemcpy(
 
 cudaError_t cudaGetDevice(int *device)
 {
-	VirtioQCArg arg;
+	VirtioQCArg *arg;
 	pfunc();
-	memset(&arg, 0, sizeof(VirtioQCArg));
 	
-	ioctl(fd, VIRTQC_cudaGetDevice, &arg);
-	*device = (int)arg.pA;
+	arg = zalloc(sizeof(VirtioQCArg));
 
-	return (cudaError_t)arg.cmd;
+	ioctl(fd, VIRTQC_cudaGetDevice, arg);
+	*device = (int)arg->pA;
+
+	free(arg);
+	return (cudaError_t)arg->cmd;
 }
 
 cudaError_t cudaGetDeviceCount(int *count)
 {
-	VirtioQCArg arg;
+	VirtioQCArg *arg;
 	pfunc();
-	memset(&arg, 0, sizeof(VirtioQCArg));
+	
+	arg = zalloc(sizeof(VirtioQCArg));
 
-	ioctl(fd, VIRTQC_cudaGetDeviceCount, &arg);
-	*count = (int)arg.pA;
+	ioctl(fd, VIRTQC_cudaGetDeviceCount, arg);
+	*count = (int)arg->pA;
 
-	return (cudaError_t)arg.cmd;
+	free(arg);
+	return (cudaError_t)arg->cmd;
 }
 
 cudaError_t cudaSetDevice(int device)
 {
-	VirtioQCArg arg;
+	VirtioQCArg *arg;
 	pfunc();
-	memset(&arg, 0, sizeof(VirtioQCArg));
-
-	ptr( arg.pA, device, 0);
-	ioctl(fd, VIRTQC_cudaGetDeviceProperties, &arg);
 	
-	return (cudaError_t)arg.cmd;
+	arg = zalloc(sizeof(VirtioQCArg));
+
+	arg->pA = (uint64_t)device;
+	ioctl(fd, VIRTQC_cudaGetDeviceProperties, arg);
+
+	free(arg);
+	return (cudaError_t)arg->cmd;
 }
 
 cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device)
 {
-	VirtioQCArg arg;
+	VirtioQCArg *arg;
 	pfunc();
-	memset(&arg, 0, sizeof(VirtioQCArg));
+	
+	arg = zalloc(sizeof(VirtioQCArg));
 
-	ptr( arg.pA, prop, sizeof(struct cudaDeviceProp));
-	ptr( arg.pB, device, 0);
-	ioctl(fd, VIRTQC_cudaSetDevice, &arg);
+	arg->pA = (uint64_t)prop;
+	arg->pASize = sizeof(struct cudaDeviceProp);
 
-	return (cudaError_t)arg.cmd;
+	arg->pB = (uint64_t)device;
+	ioctl(fd, VIRTQC_cudaSetDevice, arg);
+
+	free(arg);
+	return (cudaError_t)arg->cmd;
 }
 
 cudaError_t cudaDeviceSynchronize(void)
 {
-	VirtioQCArg arg;
+	VirtioQCArg *arg;
 	pfunc();
-	memset(&arg, 0, sizeof(VirtioQCArg));
 	
-	ioctl(fd, VIRTQC_cudaDeviceSynchronize, &arg);
-	
-	return (cudaError_t)arg.cmd;
+	arg = zalloc(sizeof(VirtioQCArg));
+
+	ioctl(fd, VIRTQC_cudaDeviceSynchronize, arg);
+
+	free(arg);
+	return (cudaError_t)arg->cmd;
 }
 
 cudaError_t cudaDeviceReset(void)
 {
-	VirtioQCArg arg;
+	VirtioQCArg *arg;
 	pfunc();
-	memset(&arg, 0, sizeof(VirtioQCArg));
+	
+	arg = zalloc(sizeof(VirtioQCArg));
 
-	ioctl(fd, VIRTQC_cudaDeviceReset, &arg);
+	ioctl(fd, VIRTQC_cudaDeviceReset, arg);
 
-	return (cudaError_t)arg.cmd;
+	free(arg);
+	return (cudaError_t)arg->cmd;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -411,26 +438,30 @@ cudaError_t cudaDeviceReset(void)
 
 cudaError_t cudaDriverGetVersion(int *driverVersion)
 {
-	VirtioQCArg arg;
+	VirtioQCArg *arg;
 	pfunc();
-	memset(&arg, 0, sizeof(VirtioQCArg));
-
-	ioctl(fd, VIRTQC_cudaDriverGetVersion, &arg);
-	*driverVersion = (int)arg.pA;
 	
-	return (cudaError_t)arg.cmd;
+	arg = zalloc(sizeof(VirtioQCArg));
+
+	ioctl(fd, VIRTQC_cudaDriverGetVersion, arg);
+	*driverVersion = (int)arg->pA;
+
+	free(arg);
+	return (cudaError_t)arg->cmd;
 }
 
 cudaError_t cudaRuntimeGetVersion(int *runtimeVersion)
 {
-	VirtioQCArg arg;
+	VirtioQCArg *arg;
 	pfunc();
-	memset(&arg, 0, sizeof(VirtioQCArg));
-
-	ioctl(fd, VIRTQC_cudaRuntimeGetVersion, &arg);
-	*runtimeVersion = (uint64_t)arg.pA;
 	
-	return (cudaError_t)arg.cmd;
+	arg = zalloc(sizeof(VirtioQCArg));
+
+	ioctl(fd, VIRTQC_cudaRuntimeGetVersion, arg);
+	*runtimeVersion = (uint64_t)arg->pA;
+
+	free(arg);
+	return (cudaError_t)arg->cmd;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -439,65 +470,75 @@ cudaError_t cudaRuntimeGetVersion(int *runtimeVersion)
 
 cudaError_t cudaEventCreate(cudaEvent_t *event)
 {
-	VirtioQCArg arg;
+	VirtioQCArg *arg;
 	pfunc();
-	memset(&arg, 0, sizeof(VirtioQCArg));
-
-	ioctl(fd, VIRTQC_cudaEventCreate, &arg);
-	*event = (void*)arg.pA;
 	
-	return (cudaError_t)arg.cmd;
+	arg = zalloc(sizeof(VirtioQCArg));
+
+	ioctl(fd, VIRTQC_cudaEventCreate, arg);
+	*event = (void*)arg->pA;
+
+	free(arg);
+	return (cudaError_t)arg->cmd;
 }
 
 cudaError_t cudaEventRecord	(cudaEvent_t event,	cudaStream_t stream)
 {
-	VirtioQCArg arg;
+	VirtioQCArg *arg;
 	pfunc();
-	memset(&arg, 0, sizeof(VirtioQCArg));
 
-	ptr( arg.pA, event, 0);
-	ptr( arg.pB, stream, 0);
-	ioctl(fd, VIRTQC_cudaEventRecord, &arg);
-	
-	return (cudaError_t)arg.cmd;
+	arg = zalloc(sizeof(VirtioQCArg));
+
+	arg->pA = (uint64_t)event;
+	arg->pB = (uint64_t)stream;
+	ioctl(fd, VIRTQC_cudaEventRecord, arg);
+
+	free(arg);
+	return (cudaError_t)arg->cmd;
 }
 
 cudaError_t cudaEventSynchronize(cudaEvent_t event)
 {
-	VirtioQCArg arg;
+	VirtioQCArg *arg;
 	pfunc();
-	memset(&arg, 0, sizeof(VirtioQCArg));
 	
-	ptr( arg.pA, event, 0);
-	ioctl(fd, VIRTQC_cudaEventSynchronize, &arg);
+	arg = zalloc(sizeof(VirtioQCArg));
+
+	arg->pA = (uint64_t)event;
+	ioctl(fd, VIRTQC_cudaEventSynchronize, arg);
 	
-	return (cudaError_t)arg.cmd;
+	free(arg);
+	return (cudaError_t)arg->cmd;
 }
 
 cudaError_t cudaEventElapsedTime(float *ms,	cudaEvent_t start, cudaEvent_t end)
 {
-	VirtioQCArg arg;
+	VirtioQCArg *arg;
 	pfunc();
-	memset(&arg, 0, sizeof(VirtioQCArg));
+	
+	arg = zalloc(sizeof(VirtioQCArg));
 
-	ptr( arg.pA, start, 0);
-	ptr( arg.pB, end, 0);
-	ioctl(fd, VIRTQC_cudaEventElapsedTime, &arg);
-	memcpy(ms, &arg.flag, sizeof(float));
+	arg->pA = (uint64_t)start;
+	arg->pB = (uint64_t)end;
+	ioctl(fd, VIRTQC_cudaEventElapsedTime, arg);
+	memcpy(ms, &arg->flag, sizeof(float));
 
-	return (cudaError_t)arg.cmd;
+	free(arg);
+	return (cudaError_t)arg->cmd;
 }
 
 cudaError_t cudaEventDestroy(cudaEvent_t event)
 {
-	VirtioQCArg arg;
+	VirtioQCArg *arg;
 	pfunc();
-	memset(&arg, 0, sizeof(VirtioQCArg));
 	
-	ptr( arg.pA, event, 0);
-	ioctl(fd, VIRTQC_cudaEventDestroy, &arg);
+	arg = zalloc(sizeof(VirtioQCArg));
 
-	return (cudaError_t)arg.cmd;
+	arg->pA = (uint64_t)event;
+	ioctl(fd, VIRTQC_cudaEventDestroy, arg);
+
+	free(arg);
+	return (cudaError_t)arg->cmd;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -506,12 +547,14 @@ cudaError_t cudaEventDestroy(cudaEvent_t event)
 
 cudaError_t cudaGetLastError(void)
 {
-	VirtioQCArg arg;
+	VirtioQCArg *arg;
 	pfunc();
-	memset(&arg, 0, sizeof(VirtioQCArg));
-
-	ioctl(fd, VIRTQC_cudaGetLastError, &arg);
 	
-	return (cudaError_t)arg.cmd;
+	arg = zalloc(sizeof(VirtioQCArg));
+
+	ioctl(fd, VIRTQC_cudaGetLastError, arg);
+
+	free(arg);
+	return (cudaError_t)arg->cmd;
 }
 
