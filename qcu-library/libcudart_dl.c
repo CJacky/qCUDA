@@ -17,7 +17,7 @@
 #define pfunc() 
 #endif
 
-#if 1
+#if 0
 #define ptrace(fmt, arg...) 	printf("###    "fmt, ##arg)
 #else
 #define ptrace(fmt, arg...)

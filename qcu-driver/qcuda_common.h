@@ -2,17 +2,39 @@
 #ifndef QCUDA_COMMON_H
 #define QCUDA_COMMON_H
 
+////////////////////////////////////////////////////////////////////////////////
+///	debug
+////////////////////////////////////////////////////////////////////////////////
+#ifdef __KERNEL__
+	#define print printk
+#else
+	#define print printf
+#endif
 
+#if (PTRACE==1)
+#define ptrace(fmt, arg...) \
+	print("### func= %-30s ,line= %-4d ," fmt, __func__,  __LINE__, ##arg)
+#else
+#define ptrace(fmt, arg...)
+#endif
+
+#if (PFUNC==1)
+#define pfunc() print("### %s\n", __func__)
+#else
+#define pfunc()
+#endif
+
+////////////////////////////////////////////////////////////////////////////////
+/// time measure
+////////////////////////////////////////////////////////////////////////////////
 #if 1
 
 #ifdef __KERNEL__
 	#include <linux/timekeeping.h>
 	#define qcu_gettime(t) do_gettimeofday(t)
-	#define print printk
 #else
 	#include <sys/time.h>
 	#define qcu_gettime(t) gettimeofday (t, NULL)
-	#define print printf
 #endif
 
 uint64_t qcu_TimeRegFatbin;
@@ -70,6 +92,9 @@ uint64_t qcu_TimeMemcpyD2H;
 
 #endif //MEAS_TIME
 
+////////////////////////////////////////////////////////////////////////////////
+///	common variables
+////////////////////////////////////////////////////////////////////////////////
 
 #define QCU_KMALLOC_SHIFT_BIT 22
 #define QCU_KMALLOC_MAX_SIZE (1UL<<QCU_KMALLOC_SHIFT_BIT)

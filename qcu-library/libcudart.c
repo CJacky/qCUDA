@@ -7,19 +7,16 @@
 #include <fcntl.h> // open
 #include <unistd.h> // close
 #include <sys/ioctl.h> // ioclt
-#include "../qcu-driver/qcuda_common.h"
 
 #include <builtin_types.h>
 #include <__cudaFatFormat.h>
 #include <fatBinaryCtl.h>
 
-#define dev_path "/dev/qcuda"
+#define	PFUNC	1
+#define PTRACE	1
+#include "../qcu-driver/qcuda_common.h"
 
-#if 0
-#define cjPrint(fmt, arg...) printf(fmt, ##arg)
-#else
-#define cjPrint(fmt, arg...)
-#endif
+#define dev_path "/dev/qcuda"
 
 #define error(fmt, arg...) printf("ERROR: "fmt, ##arg)
 
@@ -28,29 +25,40 @@
 	memset(addr, 0, n); \
 	addr; })
 
-
 #define ptr( p , v, s)\
 	p = (uint64_t)v; \
 	p##Size = (uint32_t)s;
 
-int fd;
+int fd = 1;
 uint32_t cudaKernelConf[7];
 uint64_t cudaKernelPara[16];
 size_t cudaParaNum = 0;
+
+void open_device()
+{
+	if( fd == -1)
+	{
+		fd = open(dev_path, O_RDWR);
+		if( fd < 0 )
+		{
+			error("open device %s faild, %s (%d)\n", dev_path, strerror(errno), errno);
+			exit (EXIT_FAILURE);
+		}
+	}
+}
+
+void close_device()
+{
+	close(fd);
+}
 
 void** __cudaRegisterFatBinary(void *fatCubin)
 {
 	unsigned int magic;
 	void **fatCubinHandle;
 
-	cjPrint("%s\n", __func__);
-	
-	fd = open(dev_path, O_RDWR);
-	if( fd < 0 )
-	{
-		error("open device %s faild, %s (%d)\n", dev_path, strerror(errno), errno);
-		exit (EXIT_FAILURE);
-	}
+	pfunc();
+	open_device();
 
 	magic = *(unsigned int*)fatCubin;
 	fatCubinHandle = malloc(sizeof(void*));
@@ -58,11 +66,11 @@ void** __cudaRegisterFatBinary(void *fatCubin)
 	if( magic == FATBINC_MAGIC)
 	{// fatBinaryCtl.h
 		__fatBinC_Wrapper_t *binary = (__fatBinC_Wrapper_t*)fatCubin;
-		cjPrint("    FATBINC_MAGIC\n");
-		cjPrint("    magic= %x\n", binary->magic);
-		cjPrint("    version= %x\n", binary->version);
-		cjPrint("    data= %p\n", binary->data);
-		cjPrint("    filename_or_fatbins= %p\n", binary->filename_or_fatbins);
+		ptrace("    FATBINC_MAGIC\n");
+		ptrace("    magic= %x\n", binary->magic);
+		ptrace("    version= %x\n", binary->version);
+		ptrace("    data= %p\n", binary->data);
+		ptrace("    filename_or_fatbins= %p\n", binary->filename_or_fatbins);
 		
 		*fatCubinHandle = (void*)binary->data;
 	}
@@ -77,7 +85,7 @@ void** __cudaRegisterFatBinary(void *fatCubin)
 		header: fatbinary.h
 		computeFatBinaryFormat_t binary = (computeFatBinaryFormat_t)fatCubin;
 		*/
-		cjPrint("Unrecognized CUDA FAT MAGIC 0x%x\n", magic);
+		ptrace("Unrecognized CUDA FAT MAGIC 0x%x\n", magic);
 		exit(EXIT_FAILURE);
 	}
 
@@ -90,12 +98,12 @@ void** __cudaRegisterFatBinary(void *fatCubin)
 
 void __cudaUnregisterFatBinary(void **fatCubinHandle)
 {
-	cjPrint("%s\n", __func__);
-	cjPrint("    fatCubinHandle= %p, value= %p\n", fatCubinHandle, *fatCubinHandle);
+	ptrace("%s\n", __func__);
+	ptrace("    fatCubinHandle= %p, value= %p\n", fatCubinHandle, *fatCubinHandle);
 
 	ioctl(fd, VIRTQC_cudaUnregisterFatBinary, NULL);
 	free(fatCubinHandle);
-	close(fd);
+	close_device();
 }
 
 void __cudaRegisterFunction(
@@ -114,27 +122,28 @@ void __cudaRegisterFunction(
 	VirtioQCArg *arg;
 	computeFatBinaryFormat_t fatBinHeader;
 
-	cjPrint("%s\n", __func__);
-	cjPrint("    fatCubinHandle= %p, value= %p\n", fatCubinHandle, *fatCubinHandle);
-	cjPrint("    hostFun= %s (%p)\n", hostFun, hostFun);
-	cjPrint("    deviceFun= %s (%p)\n", deviceFun, deviceFun);
-	cjPrint("    deviceName= %s\n", deviceName);
-	cjPrint("    thread_limit= %d\n", thread_limit);
+	pfunc();
 
-	if(tid) cjPrint("    tid= %u %u %u\n", tid->x, tid->y, tid->z);
-	else	cjPrint("    tid is NULL\n");
+	ptrace("    fatCubinHandle= %p, value= %p\n", fatCubinHandle, *fatCubinHandle);
+	ptrace("    hostFun= %s (%p)\n", hostFun, hostFun);
+	ptrace("    deviceFun= %s (%p)\n", deviceFun, deviceFun);
+	ptrace("    deviceName= %s\n", deviceName);
+	ptrace("    thread_limit= %d\n", thread_limit);
 
-	if(bid)	cjPrint("    bid= %u %u %u\n", bid->x, bid->y, bid->z);
-	else	cjPrint("    bid is NULL\n");
+	if(tid) ptrace("    tid= %u %u %u\n", tid->x, tid->y, tid->z);
+	else	ptrace("    tid is NULL\n");
 
-	if(bDim)cjPrint("    bDim= %u %u %u\n", bDim->x, bDim->y, bDim->z);
-	else	cjPrint("    bDim is NULL\n");
+	if(bid)	ptrace("    bid= %u %u %u\n", bid->x, bid->y, bid->z);
+	else	ptrace("    bid is NULL\n");
 
-	if(gDim)cjPrint("    gDim= %u %u %u\n", gDim->x, gDim->y, gDim->z);
-	else	cjPrint("    gDim is NULL\n");
+	if(bDim)ptrace("    bDim= %u %u %u\n", bDim->x, bDim->y, bDim->z);
+	else	ptrace("    bDim is NULL\n");
 
-	if(wSize)cjPrint("    wSize= %d\n", *wSize);
-	else	 cjPrint("    wSize is NULL\n");
+	if(gDim)ptrace("    gDim= %u %u %u\n", gDim->x, gDim->y, gDim->z);
+	else	ptrace("    gDim is NULL\n");
+
+	if(wSize)ptrace("    wSize= %d\n", *wSize);
+	else	 ptrace("    wSize is NULL\n");
 
 	arg = zalloc(sizeof(VirtioQCArg));
 	fatBinHeader = (computeFatBinaryFormat_t)(*fatCubinHandle);
@@ -142,7 +151,7 @@ void __cudaRegisterFunction(
 	ptr( arg->pA , fatBinHeader, fatBinHeader->fatSize);
 	ptr( arg->pB , deviceName  , strlen(deviceName)+1 );
 
-//	cjPrint("pA= %p, pASize= %u, pB= %p, pBSize= %u\n", 
+//	ptrace("pA= %p, pASize= %u, pB= %p, pBSize= %u\n", 
 //			(void*)arg->pA, arg->pASize, (void*)arg->pB, arg->pBSize);
 
 	ioctl(fd, VIRTQC_cudaRegisterFunction, arg);
@@ -154,7 +163,8 @@ cudaError_t cudaMalloc(void** devPtr, size_t size)
 {
 	VirtioQCArg *arg;
 
-	cjPrint("%s\n", __func__);
+	pfunc();
+	open_device();
 
 	arg = zalloc(sizeof(VirtioQCArg));
 
@@ -165,7 +175,7 @@ cudaError_t cudaMalloc(void** devPtr, size_t size)
 
 	*devPtr = (void*)arg->pA;
 	
-	cjPrint("    devPtr= %p\n", (void*)arg->pA);
+	ptrace("    devPtr= %p\n", (void*)arg->pA);
 
 	free(arg);
 	return cudaSuccess;
@@ -177,13 +187,13 @@ cudaError_t cudaFree(void* devPtr)
 
 	arg = zalloc(sizeof(VirtioQCArg));
 
-	cjPrint("%s\n", __func__);
+	ptrace("%s\n", __func__);
 
 	ptr( arg->pA, devPtr, 0);
 
 	ioctl(fd, VIRTQC_cudaFree, arg);
 
-	cjPrint("    devPtr= %p\n", (void*)arg->pA);
+	ptrace("    devPtr= %p\n", (void*)arg->pA);
 
 	free(arg);
 	return cudaSuccess;
@@ -198,8 +208,8 @@ cudaError_t cudaMemcpy(
 	VirtioQCArg *arg;
 	arg = zalloc(sizeof(VirtioQCArg));
 
-	cjPrint("%s\n", __func__);
-//	cjPrint("dst= %p , src= %p ,size= %u\n", dst, src, size);
+	ptrace("%s\n", __func__);
+//	ptrace("dst= %p , src= %p ,size= %u\n", dst, src, size);
 
 	if( kind == cudaMemcpyHostToDevice)
 	{
@@ -232,12 +242,12 @@ cudaError_t cudaConfigureCall(
 		size_t sharedMem, 
 		cudaStream_t stream)
 {
-	cjPrint("%s\n", __func__);
-	cjPrint("    gridDim= %d %d %d\n", gridDim.x, gridDim.y, gridDim.z);
-	cjPrint("    blockDim= %d %d %d\n", blockDim.x, blockDim.y, blockDim.z);
-	cjPrint("    sharedMem= %lu\n", sharedMem);
-	cjPrint("    stream= %p\n", (void*)stream);
-	//cjPrint("    size= %lu\n", sizeof(cudaStream_t));
+	ptrace("%s\n", __func__);
+	ptrace("    gridDim= %d %d %d\n", gridDim.x, gridDim.y, gridDim.z);
+	ptrace("    blockDim= %d %d %d\n", blockDim.x, blockDim.y, blockDim.z);
+	ptrace("    sharedMem= %lu\n", sharedMem);
+	ptrace("    stream= %p\n", (void*)stream);
+	//ptrace("    size= %lu\n", sizeof(cudaStream_t));
 
 	cudaKernelConf[0] = gridDim.x;
 	cudaKernelConf[1] = gridDim.y;
@@ -257,20 +267,20 @@ cudaError_t cudaSetupArgument(
 		size_t size, 
 		size_t offset)
 {
-	cjPrint("%s\n", __func__);
+	ptrace("%s\n", __func__);
 	/*
 	switch(size)
 	{
 		case 4:
-			cjPrint("    arg= %p, value= %u\n", arg, *(unsigned int*)arg);
+			ptrace("    arg= %p, value= %u\n", arg, *(unsigned int*)arg);
 			break;
 		case 8:
-			cjPrint("    arg= %p, value= %llx\n", arg, *(unsigned long long*)arg);
+			ptrace("    arg= %p, value= %llx\n", arg, *(unsigned long long*)arg);
 			break;
 	}
 
-	cjPrint("    size= %lu\n", size);
-	cjPrint("    offset= %lu\n", offset);
+	ptrace("    size= %lu\n", size);
+	ptrace("    offset= %lu\n", offset);
 */
 //	uint64_t *buf = (uint64_t*)&cudaKernelConf[7];
 	/*
@@ -279,7 +289,7 @@ cudaError_t cudaSetupArgument(
 		case 4: buf[ cudaParaNum ] = *(uint32_t*)arg;
 		case 8: buf[ cudaParaNum ] = *(uint64_t*)arg;
 		default:
-			cjPrint("    unknow data size %lu\n", size);
+			ptrace("    unknow data size %lu\n", size);
 	}*/
 
 	if( size == 4 )
@@ -292,10 +302,10 @@ cudaError_t cudaSetupArgument(
 	}
 	else
 	{
-		cjPrint("    unknow data size %lu\n", size);
+		ptrace("    unknow data size %lu\n", size);
 	}
 
-	cjPrint("    para %lu = %llx\n", cudaParaNum, 
+	ptrace("    para %lu = %llx\n", cudaParaNum, 
 			(unsigned long long)cudaKernelPara[cudaParaNum]);
 
 	cudaParaNum++;
@@ -308,7 +318,7 @@ cudaError_t cudaLaunch(const void *func)
 	VirtioQCArg *arg;
 	arg = zalloc(sizeof(VirtioQCArg));
 
-	cjPrint("%s\n", __func__);
+	ptrace("%s\n", __func__);
 
 	ptr( arg->pA, cudaKernelConf, 7*sizeof(uint32_t));
 	ptr( arg->pB, cudaKernelPara, cudaParaNum*sizeof(uint64_t));

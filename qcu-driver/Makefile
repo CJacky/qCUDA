@@ -5,7 +5,7 @@ MOD	:= qcuda
 obj-m := ${MOD}.o
 ${MOD}-objs := ${MOD}_driver.o
 
-#CFLAGS_MODULE+=-Wno-unused-value -Wno-unused-variable -Wno-unused-function
+#CFLAGS_MODULE+=-I/usr/local/cuda/include
 KERDIR:=/lib/modules/$(shell uname -r)/build
 # PWD=$(shell pwd)
 
