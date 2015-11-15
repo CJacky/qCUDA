@@ -5,92 +5,25 @@
 ////////////////////////////////////////////////////////////////////////////////
 ///	debug
 ////////////////////////////////////////////////////////////////////////////////
+
 #ifdef __KERNEL__
 	#define print printk
 #else
 	#define print printf
 #endif
 
-#if (PTRACE==1)
-#define ptrace(fmt, arg...) \
-	print("### func= %-30s ,line= %-4d ," fmt, __func__,  __LINE__, ##arg)
-#else
-#define ptrace(fmt, arg...)
-#endif
-
 #if (PFUNC==1)
-#define pfunc() print("### %s\n", __func__)
+#define pfunc() print("### %s : %d\n", __func__, __LINE__)
 #else
 #define pfunc()
 #endif
 
-////////////////////////////////////////////////////////////////////////////////
-/// time measure
-////////////////////////////////////////////////////////////////////////////////
-#if 1
-
-#ifdef __KERNEL__
-	#include <linux/timekeeping.h>
-	#define qcu_gettime(t) do_gettimeofday(t)
+#if (PTRACE==1)
+#define ptrace(fmt, arg...) \
+	print("    ### " fmt, ##arg)
 #else
-	#include <sys/time.h>
-	#define qcu_gettime(t) gettimeofday (t, NULL)
+#define ptrace(fmt, arg...)
 #endif
-
-uint64_t qcu_TimeRegFatbin;
-uint64_t qcu_TimeUnFatbin;
-uint64_t qcu_TimeRegFunc;
-uint64_t qcu_TimeLaunch;
-uint64_t qcu_TimeMalloc;
-uint64_t qcu_TimeFree;
-uint64_t qcu_TimeMemcpyH2D;
-uint64_t qcu_TimeMemcpyD2H;
-
-#define time_reset() \
-	qcu_TimeRegFatbin = 0; \
-	qcu_TimeRegFunc = 0; \
-	qcu_TimeMalloc = 0; \
-	qcu_TimeLaunch = 0; \
-	qcu_TimeFree = 0; \
-	qcu_TimeUnFatbin = 0; \
-	qcu_TimeMemcpyH2D = 0; \
-	qcu_TimeMemcpyD2H = 0;
-
-#define time_print() \
-	print("%s\t%llu\n", "cudaRegisterFatBinary", (unsigned long long)qcu_TimeRegFatbin); \
-	print("%s\t%llu\n", "cudaRegisterFunction", (unsigned long long)qcu_TimeRegFunc); \
-	print("%s\t%llu\n", "cudaMalloc", (unsigned long long)qcu_TimeMalloc); \
-	print("%s\t%llu\n", "cudaMemcpyH2D", (unsigned long long)qcu_TimeMemcpyH2D); \
-	print("%s\t%llu\n", "cudaMemcpyD2H", (unsigned long long)qcu_TimeMemcpyD2H); \
-	print("%s\t%llu\n", "cudaLaunch", (unsigned long long)qcu_TimeLaunch); \
-	print("%s\t%llu\n", "cudaFree", (unsigned long long)qcu_TimeFree); \
-	print("%s\t%llu\n", "cudaUnregisterFatBinary", (unsigned long long)qcu_TimeUnFatbin); \
-	print("\n\n");
-
-#define time_begin() \
-	struct timeval timeval_begin; \
-	qcu_gettime(&timeval_begin);
-
-#define time_end() ({ \
-		struct timeval timeval_end; \
-		uint64_t time_usec; \
-		qcu_gettime( &timeval_end); \
-		time_usec = (timeval_end.tv_sec  - timeval_begin.tv_sec)*1000000; \
-		time_usec+= (timeval_end.tv_usec - timeval_begin.tv_usec); \
-		time_usec; })
-
-#define time_add(v, t) \
-	v += t
-
-#else // MEAS_TIME
-
-#define time_reset()
-#define time_begin()
-#define time_end()
-#define time_print()
-#define time_add(v, t) 
-
-#endif //MEAS_TIME
 
 ////////////////////////////////////////////////////////////////////////////////
 ///	common variables

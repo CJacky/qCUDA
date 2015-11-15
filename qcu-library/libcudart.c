@@ -12,23 +12,54 @@
 #include <__cudaFatFormat.h>
 #include <fatBinaryCtl.h>
 
-#define	PFUNC	1
-#define PTRACE	1
+#define	PFUNC	0
+#define PTRACE	0
 #include "../qcu-driver/qcuda_common.h"
 
 #define dev_path "/dev/qcuda"
 
 #define error(fmt, arg...) printf("ERROR: "fmt, ##arg)
 
+#if 1
+struct timeval timeval_begin, timeval_end;
+#include <sys/time.h>
+#define time_begin() gettimeofday (&timeval_begin, NULL)
 
-#define ptr( p , v, s)\
+
+#define time_end(str) 	\
+	gettimeofday (&timeval_end, NULL); \
+	printf("%u ", \
+			(unsigned int)((timeval_end.tv_sec  - timeval_begin.tv_sec)*1000000 + \
+						  (timeval_end.tv_usec - timeval_begin.tv_usec)))
+#else
+#define time_begin()
+#define time_end(str)
+#endif
+
+#if 1
+struct timeval timeval_begin, timeval_end;
+#undef time_begin
+#undef time_end
+#include <sys/time.h>
+#define time_begin() gettimeofday (&timeval_begin, NULL)
+#define time_end() 	\
+	gettimeofday (&timeval_end, NULL); \
+	printf("%u ", \
+		(unsigned int)((timeval_end.tv_sec  - timeval_begin.tv_sec)*1000000 + \
+	 				   (timeval_end.tv_usec - timeval_begin.tv_usec)))
+#else
+#define time_begin()
+#define time_end()
+#endif
+
+#define ptr( p , v, s) \
 	p = (uint64_t)v; \
-p##Size = (uint32_t)s;
+	p##Size = (uint32_t)s;
 
 int fd = -1;
 uint32_t cudaKernelConf[7];
 uint64_t cudaKernelPara[16];
-size_t cudaParaNum = 0;
+uint32_t cudaParaNum = 0;
 
 ////////////////////////////////////////////////////////////////////////////////
 /// General Function
@@ -60,8 +91,8 @@ void** __cudaRegisterFatBinary(void *fatCubin)
 {
 	unsigned int magic;
 	void **fatCubinHandle;
-
 	pfunc();
+	time_begin();
 	open_device();
 
 	magic = *(unsigned int*)fatCubin;
@@ -70,11 +101,11 @@ void** __cudaRegisterFatBinary(void *fatCubin)
 	if( magic == FATBINC_MAGIC)
 	{// fatBinaryCtl.h
 		__fatBinC_Wrapper_t *binary = (__fatBinC_Wrapper_t*)fatCubin;
-		ptrace("    FATBINC_MAGIC\n");
-		ptrace("    magic= %x\n", binary->magic);
-		ptrace("    version= %x\n", binary->version);
-		ptrace("    data= %p\n", binary->data);
-		ptrace("    filename_or_fatbins= %p\n", binary->filename_or_fatbins);
+		ptrace("FATBINC_MAGIC\n");
+		ptrace("magic= %x\n", binary->magic);
+		ptrace("version= %x\n", binary->version);
+		ptrace("data= %p\n", binary->data);
+		ptrace("filename_or_fatbins= %p\n", binary->filename_or_fatbins);
 
 		*fatCubinHandle = (void*)binary->data;
 	}
@@ -94,20 +125,25 @@ computeFatBinaryFormat_t binary = (computeFatBinaryFormat_t)fatCubin;
 	}
 
 	ioctl(fd, VIRTQC_cudaRegisterFatBinary, NULL);
+	ptrace("ioctl finish\n");
 
 	// the pointer value is cubin ELF entry point
+	time_end();
 	return fatCubinHandle;
 }
 
 
 void __cudaUnregisterFatBinary(void **fatCubinHandle)
 {
-	ptrace("%s\n", __func__);
-	ptrace("    fatCubinHandle= %p, value= %p\n", fatCubinHandle, *fatCubinHandle);
+	pfunc();
+	time_begin();
 
+	ptrace("fatCubinHandle= %p, value= %p\n", fatCubinHandle, *fatCubinHandle);
 	ioctl(fd, VIRTQC_cudaUnregisterFatBinary, NULL);
+
 	free(fatCubinHandle);
 	close_device();
+	time_end();
 }
 
 void __cudaRegisterFunction(
@@ -125,32 +161,31 @@ void __cudaRegisterFunction(
 {
 	VirtioQCArg arg;
 	computeFatBinaryFormat_t fatBinHeader;
-
 	pfunc();
+	time_begin();
+
+	ptrace("fatCubinHandle= %p, value= %p\n", fatCubinHandle, *fatCubinHandle);
+	ptrace("hostFun= %s (%p)\n", hostFun, hostFun);
+	ptrace("deviceFun= %s (%p)\n", deviceFun, deviceFun);
+	ptrace("deviceName= %s\n", deviceName);
+	ptrace("thread_limit= %d\n", thread_limit);
+
+	if(tid) ptrace("tid= %u %u %u\n", tid->x, tid->y, tid->z);
+	else	ptrace("tid is NULL\n");
+
+	if(bid)	ptrace("bid= %u %u %u\n", bid->x, bid->y, bid->z);
+	else	ptrace("bid is NULL\n");
+
+	if(bDim)ptrace("bDim= %u %u %u\n", bDim->x, bDim->y, bDim->z);
+	else	ptrace("bDim is NULL\n");
+
+	if(gDim)ptrace("gDim= %u %u %u\n", gDim->x, gDim->y, gDim->z);
+	else	ptrace("gDim is NULL\n");
+
+	if(wSize)ptrace("wSize= %d\n", *wSize);
+	else	 ptrace("wSize is NULL\n");
+
 	memset(&arg, 0, sizeof(VirtioQCArg));
-
-	ptrace("    fatCubinHandle= %p, value= %p\n", fatCubinHandle, *fatCubinHandle);
-	ptrace("    hostFun= %s (%p)\n", hostFun, hostFun);
-	ptrace("    deviceFun= %s (%p)\n", deviceFun, deviceFun);
-	ptrace("    deviceName= %s\n", deviceName);
-	ptrace("    thread_limit= %d\n", thread_limit);
-
-	if(tid) ptrace("    tid= %u %u %u\n", tid->x, tid->y, tid->z);
-	else	ptrace("    tid is NULL\n");
-
-	if(bid)	ptrace("    bid= %u %u %u\n", bid->x, bid->y, bid->z);
-	else	ptrace("    bid is NULL\n");
-
-	if(bDim)ptrace("    bDim= %u %u %u\n", bDim->x, bDim->y, bDim->z);
-	else	ptrace("    bDim is NULL\n");
-
-	if(gDim)ptrace("    gDim= %u %u %u\n", gDim->x, gDim->y, gDim->z);
-	else	ptrace("    gDim is NULL\n");
-
-	if(wSize)ptrace("    wSize= %d\n", *wSize);
-	else	 ptrace("    wSize is NULL\n");
-
-	
 	fatBinHeader = (computeFatBinaryFormat_t)(*fatCubinHandle);
 
 	ptr( arg.pA , fatBinHeader, fatBinHeader->fatSize);
@@ -169,11 +204,13 @@ cudaError_t cudaConfigureCall(
 		cudaStream_t stream)
 {
 	pfunc();
-	ptrace("    gridDim= %d %d %d\n", gridDim.x, gridDim.y, gridDim.z);
-	ptrace("    blockDim= %d %d %d\n", blockDim.x, blockDim.y, blockDim.z);
-	ptrace("    sharedMem= %lu\n", sharedMem);
-	ptrace("    stream= %p\n", (void*)stream);
-	//ptrace("    size= %lu\n", sizeof(cudaStream_t));
+	time_begin();
+
+	ptrace("gridDim= %d %d %d\n", gridDim.x, gridDim.y, gridDim.z);
+	ptrace("blockDim= %d %d %d\n", blockDim.x, blockDim.y, blockDim.z);
+	ptrace("sharedMem= %lu\n", sharedMem);
+	ptrace("stream= %p\n", (void*)stream);
+	//ptrace("size= %lu\n", sizeof(cudaStream_t));
 
 	cudaKernelConf[0] = gridDim.x;
 	cudaKernelConf[1] = gridDim.y;
@@ -185,6 +222,7 @@ cudaError_t cudaConfigureCall(
 
 	cudaKernelConf[6] = sharedMem;
 
+	time_end();
 	return cudaSuccess;
 }
 
@@ -228,10 +266,10 @@ cudaError_t cudaSetupArgument(
 	}
 	else
 	{
-		ptrace("    unknow data size %lu\n", size);
+		ptrace("unknow data size %lu\n", size);
 	}
 
-	ptrace("    para %lu = %llx\n", cudaParaNum, 
+	ptrace("para %u = %llx\n", cudaParaNum, 
 			(unsigned long long)cudaKernelPara[cudaParaNum]);
 
 	cudaParaNum++;
@@ -243,15 +281,16 @@ cudaError_t cudaLaunch(const void *func)
 {
 	VirtioQCArg arg;
 	pfunc();
+	time_begin();
+
 	memset(&arg, 0, sizeof(VirtioQCArg));
-	
 	ptr( arg.pA, cudaKernelConf, 7*sizeof(uint32_t));
 	ptr( arg.pB, cudaKernelPara, cudaParaNum*sizeof(uint64_t));
 
 	ioctl(fd, VIRTQC_cudaLaunch, &arg);
-
 	cudaParaNum = 0;
-	
+
+	time_end();
 	return cudaSuccess;
 }
 
@@ -262,20 +301,18 @@ cudaError_t cudaLaunch(const void *func)
 cudaError_t cudaMalloc(void** devPtr, size_t size)
 {
 	VirtioQCArg arg;
-
 	pfunc();
-	memset(&arg, 0, sizeof(VirtioQCArg));
-	open_device();
+	time_begin();
 
+	memset(&arg, 0, sizeof(VirtioQCArg));
 	ptr( arg.pA, 0,  0);
 	arg.flag = size;
 
 	ioctl(fd, VIRTQC_cudaMalloc, &arg);
-
 	*devPtr = (void*)arg.pA;
+	ptrace("devPtr= %p\n", (void*)arg.pA);
 
-	ptrace("    devPtr= %p\n", (void*)arg.pA);
-
+	time_end();
 	return (cudaError_t)arg.cmd;
 }
 
@@ -283,14 +320,15 @@ cudaError_t cudaFree(void* devPtr)
 {
 	VirtioQCArg arg;
 	pfunc();
-	memset(&arg, 0, sizeof(VirtioQCArg));
+	time_begin();
 
+	memset(&arg, 0, sizeof(VirtioQCArg));
 	ptr( arg.pA, devPtr, 0);
 
 	ioctl(fd, VIRTQC_cudaFree, &arg);
+	ptrace("devPtr= %p\n", (void*)arg.pA);
 
-	ptrace("    devPtr= %p\n", (void*)arg.pA);
-	
+	time_end();
 	return (cudaError_t)arg.cmd;
 }
 
@@ -302,8 +340,9 @@ cudaError_t cudaMemcpy(
 {
 	VirtioQCArg arg;
 	pfunc();
-	memset(&arg, 0, sizeof(VirtioQCArg));
+	time_begin();
 
+	memset(&arg, 0, sizeof(VirtioQCArg));
 	ptrace("dst= %p , src= %p ,size= %lu\n", (void*)dst, (void*)src, count);
 
 	if( kind == cudaMemcpyHostToDevice)
@@ -318,15 +357,22 @@ cudaError_t cudaMemcpy(
 		ptr( arg.pB, src, 0);
 		arg.flag   = 2;
 	}
+	else if( kind == cudaMemcpyDeviceToDevice )
+	{
+		
+		ptr( arg.pA, dst, 0);
+		ptr( arg.pB, src, 0);
+		arg.flag   = 3;
+	}
 	else
 	{
-		error("Not impletment cudaMemcpyKind\n");
-		
+		error("Not impletment cudaMemcpyKind %d\n", kind);
 		return cudaErrorInvalidValue;
 	}
 
 	ioctl(fd, VIRTQC_cudaMemcpy, &arg);
 
+	time_end();
 	return (cudaError_t)arg.cmd;
 }
 
@@ -338,11 +384,14 @@ cudaError_t cudaGetDevice(int *device)
 {
 	VirtioQCArg arg;
 	pfunc();
+	time_begin();
+
 	memset(&arg, 0, sizeof(VirtioQCArg));
-	
+
 	ioctl(fd, VIRTQC_cudaGetDevice, &arg);
 	*device = (int)arg.pA;
 
+	time_end();
 	return (cudaError_t)arg.cmd;
 }
 
@@ -350,11 +399,14 @@ cudaError_t cudaGetDeviceCount(int *count)
 {
 	VirtioQCArg arg;
 	pfunc();
+	time_begin();
+
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
 	ioctl(fd, VIRTQC_cudaGetDeviceCount, &arg);
 	*count = (int)arg.pA;
 
+	time_end();
 	return (cudaError_t)arg.cmd;
 }
 
@@ -362,11 +414,14 @@ cudaError_t cudaSetDevice(int device)
 {
 	VirtioQCArg arg;
 	pfunc();
+	time_begin();
+	open_device();
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
 	ptr( arg.pA, device, 0);
-	ioctl(fd, VIRTQC_cudaGetDeviceProperties, &arg);
-	
+	ioctl(fd, VIRTQC_cudaSetDevice, &arg);
+
+	time_end();
 	return (cudaError_t)arg.cmd;
 }
 
@@ -374,12 +429,15 @@ cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device)
 {
 	VirtioQCArg arg;
 	pfunc();
+	time_begin();
+
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
 	ptr( arg.pA, prop, sizeof(struct cudaDeviceProp));
 	ptr( arg.pB, device, 0);
-	ioctl(fd, VIRTQC_cudaSetDevice, &arg);
+	ioctl(fd, VIRTQC_cudaGetDeviceProperties, &arg);
 
+	time_end();
 	return (cudaError_t)arg.cmd;
 }
 
@@ -387,10 +445,13 @@ cudaError_t cudaDeviceSynchronize(void)
 {
 	VirtioQCArg arg;
 	pfunc();
+	time_begin();
+
 	memset(&arg, 0, sizeof(VirtioQCArg));
-	
+
 	ioctl(fd, VIRTQC_cudaDeviceSynchronize, &arg);
-	
+
+	time_end();
 	return (cudaError_t)arg.cmd;
 }
 
@@ -398,10 +459,13 @@ cudaError_t cudaDeviceReset(void)
 {
 	VirtioQCArg arg;
 	pfunc();
+	time_begin();
+
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
 	ioctl(fd, VIRTQC_cudaDeviceReset, &arg);
 
+	time_end();
 	return (cudaError_t)arg.cmd;
 }
 
@@ -413,11 +477,14 @@ cudaError_t cudaDriverGetVersion(int *driverVersion)
 {
 	VirtioQCArg arg;
 	pfunc();
+	time_begin();
+
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
 	ioctl(fd, VIRTQC_cudaDriverGetVersion, &arg);
 	*driverVersion = (int)arg.pA;
-	
+
+	time_end();
 	return (cudaError_t)arg.cmd;
 }
 
@@ -425,11 +492,14 @@ cudaError_t cudaRuntimeGetVersion(int *runtimeVersion)
 {
 	VirtioQCArg arg;
 	pfunc();
+	time_begin();
+
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
 	ioctl(fd, VIRTQC_cudaRuntimeGetVersion, &arg);
 	*runtimeVersion = (uint64_t)arg.pA;
-	
+
+	time_end();
 	return (cudaError_t)arg.cmd;
 }
 
@@ -441,11 +511,14 @@ cudaError_t cudaEventCreate(cudaEvent_t *event)
 {
 	VirtioQCArg arg;
 	pfunc();
+	time_begin();
+
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
 	ioctl(fd, VIRTQC_cudaEventCreate, &arg);
 	*event = (void*)arg.pA;
-	
+
+	time_end();
 	return (cudaError_t)arg.cmd;
 }
 
@@ -453,12 +526,15 @@ cudaError_t cudaEventRecord	(cudaEvent_t event,	cudaStream_t stream)
 {
 	VirtioQCArg arg;
 	pfunc();
+	time_begin();
+
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
 	ptr( arg.pA, event, 0);
 	ptr( arg.pB, stream, 0);
 	ioctl(fd, VIRTQC_cudaEventRecord, &arg);
-	
+
+	time_end();
 	return (cudaError_t)arg.cmd;
 }
 
@@ -466,11 +542,14 @@ cudaError_t cudaEventSynchronize(cudaEvent_t event)
 {
 	VirtioQCArg arg;
 	pfunc();
+	time_begin();
+
 	memset(&arg, 0, sizeof(VirtioQCArg));
-	
+
 	ptr( arg.pA, event, 0);
 	ioctl(fd, VIRTQC_cudaEventSynchronize, &arg);
-	
+
+	time_end();
 	return (cudaError_t)arg.cmd;
 }
 
@@ -478,13 +557,17 @@ cudaError_t cudaEventElapsedTime(float *ms,	cudaEvent_t start, cudaEvent_t end)
 {
 	VirtioQCArg arg;
 	pfunc();
+	time_begin();
+
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
 	ptr( arg.pA, start, 0);
 	ptr( arg.pB, end, 0);
 	ioctl(fd, VIRTQC_cudaEventElapsedTime, &arg);
+
 	memcpy(ms, &arg.flag, sizeof(float));
 
+	time_end();
 	return (cudaError_t)arg.cmd;
 }
 
@@ -492,11 +575,14 @@ cudaError_t cudaEventDestroy(cudaEvent_t event)
 {
 	VirtioQCArg arg;
 	pfunc();
+	time_begin();
+
 	memset(&arg, 0, sizeof(VirtioQCArg));
-	
+
 	ptr( arg.pA, event, 0);
 	ioctl(fd, VIRTQC_cudaEventDestroy, &arg);
 
+	time_end();
 	return (cudaError_t)arg.cmd;
 }
 
@@ -508,10 +594,13 @@ cudaError_t cudaGetLastError(void)
 {
 	VirtioQCArg arg;
 	pfunc();
+	time_begin();
+
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
 	ioctl(fd, VIRTQC_cudaGetLastError, &arg);
-	
+
+	time_end();
 	return (cudaError_t)arg.cmd;
 }
 

@@ -1,17 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <cuda_runtime.h>
-
-/*
 #include <sys/time.h>
-#define time_define() struct timeval timeval_begin
-#define time_begin() gettimeofday (&timeval_begin, NULL);
-#define time_end() ({ \
-	struct timeval timeval_end; \
-	gettimeofday (&timeval_end, NULL); \
-	(double)((timeval_end.tv_sec-timeval_begin.tv_sec)+((timeval_end.tv_usec-timeval_begin.tv_usec)/1000000.0)); \
-	})
-*/
 
 #define a(i, j) ((i)*y+(j))
 #define b(i, j) ((i)*z+(j))
@@ -45,7 +35,6 @@ int main(int argc, char* argv[])
 	elem_t *A_h, *A_d;
 	elem_t *B_h, *B_d;
 	elem_t *C_h, *C_d;
-	//time_define();
 
 	x = (argc>=2)? atoi(argv[1]):3;
 	y = (argc>=3)? atoi(argv[2]):3;
@@ -56,41 +45,40 @@ int main(int argc, char* argv[])
 		return -1;
 	}
 
+
 	// malloc matrix memory in host
 	A_h = (elem_t*)malloc( x*y*sizeof(elem_t));
 	B_h = (elem_t*)malloc( y*z*sizeof(elem_t));
 	C_h = (elem_t*)malloc( x*z*sizeof(elem_t));
+
+
+	// malloc matrix memory in device
+	cudaMalloc(&A_d, x*y*sizeof(elem_t));
+	cudaMalloc(&B_d, y*z*sizeof(elem_t));
+	cudaMalloc(&C_d, x*z*sizeof(elem_t));
+
 
 	// init matrix 
 	for(i=0; i<x*y; i++) A_h[i] = rand()%10;
 	for(i=0; i<y*z; i++) B_h[i] = rand()%10;
 	//for(int i=0; i<x*z; i++) C_h[i] = 0;
 
-//********************************************************************
-	//time_begin();
-	
-	// malloc matrix memory in device
-	cudaMalloc(&A_d, x*y*sizeof(elem_t));
-	cudaMalloc(&B_d, y*z*sizeof(elem_t));
-	cudaMalloc(&C_d, x*z*sizeof(elem_t));
 
 	// copy matrix from host to device
 	cudaMemcpy(A_d, A_h, x*y*sizeof(elem_t), cudaMemcpyHostToDevice);
 	cudaMemcpy(B_d, B_h, y*z*sizeof(elem_t), cudaMemcpyHostToDevice);
 	//cudaMemcpy(C_d, C_h, x*z*sizeof(elem_t), cudaMemcpyHostToDevice);
 
+
 	dim3 threads(32, 32);
 	dim3 blocks( (x%32)?x/32+1:x/32, (z%32)?z/32+1:z/32);
 	
+
 	matrixMul <<< blocks, threads >>>(A_d, B_d, C_d, x, y, z);
+
 
 	cudaMemcpy(C_h, C_d, x*z*sizeof(elem_t), cudaMemcpyDeviceToHost);
 
-	cudaFree(A_d);
-	cudaFree(B_d);
-	cudaFree(C_d);
-
-	//printf("%f\n", time_end());
 //********************************************************************
 
 #if DUMP_FILE
@@ -121,9 +109,14 @@ int main(int argc, char* argv[])
 	fclose(f);
 #endif
 
+	cudaFree(A_d);
+	cudaFree(B_d);
+	cudaFree(C_d);
+
+
 	free(A_h);
 	free(B_h);
 	free(C_h);
-
+//	cudaDeviceReset();
 	return 0;
 }

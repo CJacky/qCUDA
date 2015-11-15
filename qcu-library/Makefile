@@ -1,9 +1,9 @@
 
 CUDA_INC=/usr/local/cuda/include
 
-LIB=libcudart
+LIB=libcudart_dl
 
-all: lib
+all: lib link
 
 libcudart_dl:
 	gcc -c -Wall -Werror -fpic -I$(CUDA_INC) $(LIB).c

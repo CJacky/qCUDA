@@ -1,4 +1,4 @@
-DUMP_FILE=1
+DUMP_FILE=0
 NVFLAGS=-arch sm_35
 
 RW=normal_rw
@@ -15,7 +15,7 @@ MADD_GPU=madd_gpu
 MADD_GPU_DRV=madd_gpu_drv
 MADD_CPU=madd_cpu
 
-all: $(RW)
+all: $(MMUL_GPU)
 
 ######################################################################
 $(MEMCPY): $(MEMCPY).cu

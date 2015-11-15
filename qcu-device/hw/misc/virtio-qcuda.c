@@ -11,8 +11,8 @@
 #include <builtin_types.h>
 #endif
 
-#define PFUNC	1
-#define PTRACE	1
+#define PFUNC	0
+#define PTRACE	0
 #include "../../../qcu-driver/qcuda_common.h"
 
 #define error(fmt, arg...) \
@@ -86,8 +86,6 @@ static inline void __cuErrorCheck(CUresult err, const int line)
 static void qcu_cudaRegisterFatBinary(VirtioQCArg *arg)
 {
 	uint32_t i;
-	time_begin();
-	time_reset();
 	pfunc();
 
 	for(i=0; i<cudaFunctionMaxNum; i++)
@@ -105,14 +103,11 @@ static void qcu_cudaRegisterFatBinary(VirtioQCArg *arg)
 
 	cudaFunctionNum = 0;
 	cudaEventNum = 0;
-
-	time_add( qcu_TimeRegFatbin , time_end() );
 }
 
 static void qcu_cudaUnregisterFatBinary(VirtioQCArg *arg)
 {
 	uint32_t i;
-	time_begin();	
 	pfunc();
 
 	for(i=0; i<cudaEventMaxNum; i++)
@@ -123,9 +118,6 @@ static void qcu_cudaUnregisterFatBinary(VirtioQCArg *arg)
 	}
 
 	cuCtxDestroy(cudaContext);
-	
-	time_add( qcu_TimeUnFatbin , time_end() );
-	time_print();
 }
 
 static void qcu_cudaRegisterFunction(VirtioQCArg *arg)
@@ -133,8 +125,6 @@ static void qcu_cudaRegisterFunction(VirtioQCArg *arg)
 	void *fatBin;
 	char *functionName;
 	uint32_t funcId;
-	time_begin();
-	
 	pfunc();
 
 	// assume fatbin size is less equal 4MB
@@ -148,8 +138,6 @@ static void qcu_cudaRegisterFunction(VirtioQCArg *arg)
 				cudaModule, functionName) );
 	cudaFunctionId[cudaFunctionNum] = funcId;
 	cudaFunctionNum++;
-	
-	time_add( qcu_TimeRegFunc ,  time_end() );
 }
 
 static void qcu_cudaLaunch(VirtioQCArg *arg)
@@ -159,7 +147,6 @@ static void qcu_cudaLaunch(VirtioQCArg *arg)
 	uint32_t paraSize, funcIdx;
 	void **paraBuf;
 	int i;
-	time_begin();
 	pfunc();
 
 	conf = gpa_to_hva(arg->pA);
@@ -191,7 +178,6 @@ static void qcu_cudaLaunch(VirtioQCArg *arg)
 				conf[6], NULL, paraBuf, NULL)); // not suppoer stream yeat
 	
 	free(paraBuf);
-	time_add( qcu_TimeLaunch , time_end() );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -203,7 +189,6 @@ static void qcu_cudaMalloc(VirtioQCArg *arg)
 	cudaError_t err;
 	uint32_t count;
 	void* devPtr;
-	time_begin();
 	pfunc();
 
 	count = arg->flag;;
@@ -212,7 +197,6 @@ static void qcu_cudaMalloc(VirtioQCArg *arg)
 	arg->pA = (uint64_t)devPtr;
 
 	ptrace("ptr= %p ,count= %u\n", (void*)arg->pA, count);
-	time_add( qcu_TimeMalloc , time_end() );
 }
 
 static void qcu_cudaMemcpy(VirtioQCArg *arg)
@@ -221,7 +205,6 @@ static void qcu_cudaMemcpy(VirtioQCArg *arg)
 	void *dst, *src;
 	uint64_t *gpa_array;
 	uint32_t size, len, i;
-	time_begin();
 	pfunc();
 
 	if( arg->flag == cudaMemcpyHostToDevice )
@@ -282,14 +265,12 @@ static void qcu_cudaMemcpy(VirtioQCArg *arg)
 	}
 
 	ptrace("size= %u\n", size);
-	time_add( qcu_TimeMemcpyD2H , time_end() );
 }
 
 static void qcu_cudaFree(VirtioQCArg *arg)
 {
 	cudaError_t err;
 	void* dst;
-	time_begin();
 	pfunc();
 
 	dst = (void*)arg->pA;
@@ -297,7 +278,6 @@ static void qcu_cudaFree(VirtioQCArg *arg)
 	arg->cmd = err;
 
 	ptrace("ptr= %16p\n", dst);
-	time_add( qcu_TimeFree , time_end() );
 }
 
 ////////////////////////////////////////////////////////////////////////////////

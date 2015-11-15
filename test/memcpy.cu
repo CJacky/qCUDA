@@ -129,6 +129,6 @@ int main(int argc, char* argv[])
 	}
 
 	free(h);
-
+	cudaDeviceReset();
 	return 0;
 }

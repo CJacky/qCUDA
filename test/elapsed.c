@@ -1,20 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
 #include <sys/time.h>
-#define time_define() struct timeval timeval_begin
-#define time_begin() gettimeofday (&timeval_begin, NULL);
-#define time_end() ({ \
-	struct timeval timeval_end; \
-	gettimeofday (&timeval_end, NULL); \
-	(((timeval_end.tv_sec-timeval_begin.tv_sec)*1000000)+(timeval_end.tv_usec-timeval_begin.tv_usec)); \
-	})
 
 int main(int argc, char* argv[])
 {
 	char cmd[512]="", buf[32];
-	time_define();
+	struct timeval begin, end;
 	int i;
 
 	for(i=1; i<argc; i++)
@@ -26,9 +18,12 @@ int main(int argc, char* argv[])
 #if 0
 	printf("%s\n", cmd);
 #else
-	time_begin();
+	gettimeofday (&begin, NULL);
 	system(cmd);
-	printf("%lu", time_end());
+	gettimeofday (&end, NULL);
+
+	printf("%lu", (((end.tv_sec -begin.tv_sec)*1000000)+
+				    (end.tv_usec-begin.tv_usec)));
 #endif
 
 	return 0;

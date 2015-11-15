@@ -19,7 +19,7 @@
 #include <linux/random.h>
 #include <linux/io.h>
 
-#define PFUNC	1
+#define PFUNC	0
 #define	PTRACE	0
 #include "qcuda_common.h"
 
@@ -48,7 +48,10 @@ static inline unsigned long copy_from_user_safe(void *to, const void __user *fro
 	unsigned long err;
 
 	if( from==NULL || n==0 )
+	{
+		memset(to, 0, n);
 		return 0;
+	}
 
 	err = copy_from_user(to, from, n);
 	if( err ){
@@ -252,36 +255,23 @@ out:
 ///	Module & Execution control
 ////////////////////////////////////////////////////////////////////////////////
 
-int qcu_cudaRegisterFatBinary(VirtioQCArg *arg)
+void qcu_cudaRegisterFatBinary(VirtioQCArg *arg)
 {	// no extra parameters
-	time_begin();
-	time_reset();
-	pfunc();
-
-	time_reset();
-
-	qcu_misc_send_cmd(arg);
-
-	time_add( qcu_TimeRegFatbin, time_end() );
-	return arg->cmd;
-}
-
-int qcu_cudaUnregisterFatBinary(VirtioQCArg *arg)
-{	// no extra parameters
-	time_begin();
 	pfunc();
 
 	qcu_misc_send_cmd(arg);
-
-	time_add( qcu_TimeUnFatbin, time_end() );
-	time_print();
-	return arg->cmd;
 }
 
-int qcu_cudaRegisterFunction(VirtioQCArg *arg)
+void qcu_cudaUnregisterFatBinary(VirtioQCArg *arg)
+{	// no extra parameters
+	pfunc();
+
+	qcu_misc_send_cmd(arg);
+}
+
+void qcu_cudaRegisterFunction(VirtioQCArg *arg)
 {	// pA: fatBin
 	// pB: functrion name
-	time_begin();
 	pfunc();
 	ptrace("function name= %s\n", (char*)arg->pB);
 
@@ -292,15 +282,11 @@ int qcu_cudaRegisterFunction(VirtioQCArg *arg)
 
 	kfree_gpa(arg->pA, arg->pASize);
 	kfree_gpa(arg->pB, arg->pBSize);
-
-	time_add( qcu_TimeRegFunc, time_end() );
-	return arg->cmd;
 }
 
-int qcu_cudaLaunch(VirtioQCArg *arg)
+void qcu_cudaLaunch(VirtioQCArg *arg)
 {	// pA: cuda kernel configuration
 	// pB: cuda kernel parameters
-	time_begin();
 	pfunc();
 
 	arg->pA = user_to_gpa(arg->pA, arg->pASize);
@@ -310,41 +296,29 @@ int qcu_cudaLaunch(VirtioQCArg *arg)
 
 	kfree_gpa(arg->pA, arg->pASize);
 	kfree_gpa(arg->pB, arg->pBSize);
-
-	time_add( qcu_TimeLaunch, time_end() );
-	return arg->cmd;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 ///	Memory Management
 ////////////////////////////////////////////////////////////////////////////////
 
-int qcu_cudaMalloc(VirtioQCArg *arg)
+void qcu_cudaMalloc(VirtioQCArg *arg)
 {	// pA: pointer of devPtr
-	time_begin();
 	pfunc();
 
 	qcu_misc_send_cmd(arg);
-
-	time_add( qcu_TimeMalloc, time_end() );
-	return arg->cmd;
 }
 
-int qcu_cudaFree(VirtioQCArg *arg)
+void qcu_cudaFree(VirtioQCArg *arg)
 {	// pA: devPtr address
-	time_begin();
 	pfunc();
 
 	qcu_misc_send_cmd(arg);
-
-	time_add( qcu_TimeFree, time_end() );
-	return arg->cmd;
 }
 
-int qcu_cudaMemcpy(VirtioQCArg *arg)
+void qcu_cudaMemcpy(VirtioQCArg *arg)
 {
 	void* u_dst = NULL;
-	time_begin();
 	pfunc();
 
 	if( arg->flag == 1 ) // cudaMemcpyHostToDevice
@@ -358,9 +332,6 @@ int qcu_cudaMemcpy(VirtioQCArg *arg)
 		qcu_misc_send_cmd(arg);
 
 		kfree_gpa(arg->pB, arg->pBSize);
-
-		time_add( qcu_TimeMemcpyH2D, time_end() );
-
 	}
 	else if( arg->flag == 2 ) // cudaMemcpyDeviceToHost
 	{
@@ -375,8 +346,6 @@ int qcu_cudaMemcpy(VirtioQCArg *arg)
 
 		gpa_to_user(u_dst, arg->pA, arg->pASize);
 		kfree_gpa(arg->pA, arg->pASize);
-
-		time_add( qcu_TimeMemcpyD2H, time_end() );
 	}
 	else if(arg->flag == 3 ) // cudaMemcpyDeviceToDevice
 	{
@@ -387,41 +356,34 @@ int qcu_cudaMemcpy(VirtioQCArg *arg)
 		//arg->pB is device pointer
 		qcu_misc_send_cmd(arg);
 	}
-	return arg->cmd;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 ///	Device Management
 ////////////////////////////////////////////////////////////////////////////////
 
-int qcu_cudaGetDevice(VirtioQCArg *arg)
+void qcu_cudaGetDevice(VirtioQCArg *arg)
 {
 	pfunc();
 
 	qcu_misc_send_cmd(arg);
-
-	return arg->cmd;
 }
 
-int qcu_cudaGetDeviceCount(VirtioQCArg *arg)
+void qcu_cudaGetDeviceCount(VirtioQCArg *arg)
 {
 	pfunc();
 
 	qcu_misc_send_cmd(arg);
-
-	return arg->cmd;
 }
 
-int qcu_cudaSetDevice(VirtioQCArg *arg)
+void qcu_cudaSetDevice(VirtioQCArg *arg)
 {
 	pfunc();
 
 	qcu_misc_send_cmd(arg);
-
-	return arg->cmd;
 }
 
-int qcu_cudaGetDeviceProperties(VirtioQCArg *arg)
+void qcu_cudaGetDeviceProperties(VirtioQCArg *arg)
 {
 	void* prop;
 
@@ -434,110 +396,88 @@ int qcu_cudaGetDeviceProperties(VirtioQCArg *arg)
 
 	gpa_to_user(prop, arg->pA, arg->pASize);
 	kfree_gpa(arg->pA, arg->pASize);
-
-	return arg->cmd;
 }
 
-int qcu_cudaDeviceSynchronize(VirtioQCArg *arg)
+void qcu_cudaDeviceSynchronize(VirtioQCArg *arg)
 {
 	pfunc();
 
 	qcu_misc_send_cmd(arg);
-
-	return arg->cmd;
 }
 
-int qcu_cudaDeviceReset(VirtioQCArg *arg)
+void qcu_cudaDeviceReset(VirtioQCArg *arg)
 {
 	pfunc();
 
 	qcu_misc_send_cmd(arg);
-
-	return arg->cmd;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 ///	Version Management
 ////////////////////////////////////////////////////////////////////////////////
 
-int qcu_cudaDriverGetVersion(VirtioQCArg *arg)
+void qcu_cudaDriverGetVersion(VirtioQCArg *arg)
 {
 	pfunc();
 
 	qcu_misc_send_cmd(arg);
-
-	return arg->cmd;
 }
 
-int qcu_cudaRuntimeGetVersion(VirtioQCArg *arg)
+void qcu_cudaRuntimeGetVersion(VirtioQCArg *arg)
 {
 	pfunc();
 
 	qcu_misc_send_cmd(arg);
-
-	return arg->cmd;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 ///	Event Management
 ////////////////////////////////////////////////////////////////////////////////
 
-int qcu_cudaEventCreate(VirtioQCArg *arg)
+void qcu_cudaEventCreate(VirtioQCArg *arg)
 {
 	pfunc();
 
 	qcu_misc_send_cmd(arg);
-
-	return arg->cmd;
 }
 
-int qcu_cudaEventRecord(VirtioQCArg *arg)
+void qcu_cudaEventRecord(VirtioQCArg *arg)
 {
 	pfunc();
 
 	qcu_misc_send_cmd(arg);
-
-	return arg->cmd;
 }
 
-int qcu_cudaEventSynchronize(VirtioQCArg *arg)
+void qcu_cudaEventSynchronize(VirtioQCArg *arg)
 {
 	pfunc();
 
 	qcu_misc_send_cmd(arg);
-
-	return arg->cmd;
 }
 
-int qcu_cudaEventElapsedTime(VirtioQCArg *arg)
+void qcu_cudaEventElapsedTime(VirtioQCArg *arg)
 {
 	pfunc();
 
 	qcu_misc_send_cmd(arg);
-
-	return arg->cmd;
 }
 
-int qcu_cudaEventDestroy(VirtioQCArg *arg)
+void qcu_cudaEventDestroy(VirtioQCArg *arg)
 {
 	pfunc();
 
 	qcu_misc_send_cmd(arg);
-
-	return arg->cmd;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Error Handling
 ////////////////////////////////////////////////////////////////////////////////
 
-int qcu_cudaGetLastError(VirtioQCArg *arg)
+void qcu_cudaGetLastError(VirtioQCArg *arg)
 {
 	pfunc();
 
 	qcu_misc_send_cmd(arg);
-
-	return arg->cmd;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -546,7 +486,6 @@ int qcu_cudaGetLastError(VirtioQCArg *arg)
 
 static int qcu_misc_write(VirtioQCArg *arg)
 {	// pA: user src pointer and size
-
 	arg->pA = user_to_gpa(arg->pA, arg->pASize);
 	qcu_misc_send_cmd(arg);
 	kfree_gpa(arg->pA, arg->pASize);
@@ -555,7 +494,6 @@ static int qcu_misc_write(VirtioQCArg *arg)
 
 static int qcu_misc_read(VirtioQCArg *arg)
 {	// pA: user buffer
-
 	void *u_dst = NULL;
 
 	arg->pA = user_to_gpa(0, arg->pASize);
@@ -574,7 +512,7 @@ static long qcu_misc_ioctl(struct file *filp, unsigned int _cmd, unsigned long _
 	VirtioQCArg *arg;
 	int err;
 
-	arg = kzalloc_safe(sizeof(VirtioQCArg));
+	arg = kmalloc_safe(sizeof(VirtioQCArg));
 	copy_from_user_safe(arg, (void*)_arg, sizeof(VirtioQCArg));
 	//ptrace("_arg= %p, arg= %p\n", (void*)_arg, arg);
 
@@ -688,9 +626,9 @@ static long qcu_misc_ioctl(struct file *filp, unsigned int _cmd, unsigned long _
 
 	copy_to_user_safe((void*)_arg, arg, sizeof(VirtioQCArg));
 
-	err = arg->cmd;
 	kfree(arg);
-	return err;
+	ptrace("return\n");
+	return 0;
 }
 
 static int qcu_misc_open(struct inode *inode, struct file *filp)
