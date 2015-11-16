@@ -11,30 +11,17 @@
 #include <fatBinaryCtl.h>
 #include <cuda.h>
 
-#if 1
-struct timeval timeval_begin, timeval_end;
-#include <sys/time.h>
-#define time_begin() gettimeofday (&timeval_begin, NULL)
-
-
-#define time_end(str) 	\
-	gettimeofday (&timeval_end, NULL); \
-	printf("%u ", \
-			(unsigned int)((timeval_end.tv_sec  - timeval_begin.tv_sec)*1000000 + \
-						  (timeval_end.tv_usec - timeval_begin.tv_usec)))
-#else
-#define time_begin()
-#define time_end(str)
-#endif
-
+#include "time_measure.h"
+				
 #if 0
-#define pfunc() printf("### %s\n", __func__)
+#define pfunc() \
+	print("### %s\n", __func__)
 #else
 #define pfunc() 
 #endif
 
 #if 0
-#define ptrace(fmt, arg...) 	printf("###    "fmt, ##arg)
+#define ptrace(fmt, arg...) 	print("###    "fmt, ##arg)
 #else
 #define ptrace(fmt, arg...)
 #endif
@@ -72,7 +59,8 @@ inline void DrvAssert( CUresult code, const char *file, int line)
 
 void open_library()
 {
-	ptrace("open library\n");
+	time_init();
+
 	lib = dlopen("/usr/local/cuda/lib64/libcudart.so.7.5.18", RTLD_LAZY);
 	if( !lib )
 	{
@@ -83,8 +71,8 @@ void open_library()
 
 void close_library()
 {
-	ptrace("close library\n");
 	dlclose(lib);
+	time_fini();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -96,7 +84,9 @@ void** __cudaRegisterFatBinary(void *fatCubin)
 	unsigned int magic = *(unsigned int*)fatCubin;
 	void **fatCubinHandle = malloc(sizeof(void*));
 
+	time_init();
 	open_library();
+
 	pfunc();
 	time_begin();
 	ptrace("    fatCubin= %p\n", fatCubin);
@@ -135,7 +125,7 @@ magic: FATBIN_MAGIC
 	cuCtxCreate(&ctx, 0, dev);
 
 	// the pointer value is cubin ELF entry point
-	time_end(__func__);
+	time_end(t_RegFatbin);
 	return fatCubinHandle;
 }
 
@@ -149,7 +139,7 @@ void __cudaUnregisterFatBinary(void **fatCubinHandle)
 
 	cuCtxDestroy(ctx);
 	free(fatCubinHandle);
-	time_end(__func__);
+	time_end(t_UnregFatbin);
 	close_library();
 }
 
@@ -212,7 +202,7 @@ void __cudaRegisterFunction(
 	funSize++;
 
 	free(fatBin);
-	time_end(__func__);
+	time_end(t_RegFunc);
 }
 
 cudaError_t cudaConfigureCall(
@@ -222,7 +212,7 @@ cudaError_t cudaConfigureCall(
 		cudaStream_t _stream)
 {
 	pfunc();
-//	time_begin();
+	time_begin();
 
 	ptrace("    gridDim= %d %d %d\n", _gridDim.x, _gridDim.y, _gridDim.z);
 	ptrace("    blockDim= %d %d %d\n", _blockDim.x, _blockDim.y, _blockDim.z);
@@ -235,7 +225,7 @@ cudaError_t cudaConfigureCall(
 	memcpy(&sharedMem, &_sharedMem, sizeof(size_t));
 	memcpy(   &stream,    &_stream, sizeof(cudaStream_t));
 
-//	time_end(__func__);
+	time_end(t_ConfigCall);
 	return cudaSuccess;
 }
 
@@ -245,7 +235,7 @@ cudaError_t cudaSetupArgument(
 		size_t offset)
 {
 	pfunc();
-//	time_begin();
+	time_begin();
 
 	switch(size)
 	{
@@ -257,8 +247,8 @@ cudaError_t cudaSetupArgument(
 			break;
 	}
 
-	ptrace("    size= %lu\n", size);
-	ptrace("    offset= %lu\n", offset);
+	ptrace("size= %lu\n", size);
+	ptrace("offset= %lu\n", offset);
 
 	/*
 	   memcpy(para+offset, arg, size);
@@ -268,7 +258,7 @@ cudaError_t cudaSetupArgument(
 	para[ paraSize ] = (void*)arg;
 	paraSize++;
 
-//	time_end(__func__);
+	time_end(t_SetArg);
 	return cudaSuccess;
 }
 
@@ -287,7 +277,7 @@ cudaError_t cudaLaunch(const void *func)
 	for(funIdx=0; funIdx<funSize; funIdx++)
 		if(funPtr[funIdx]==func) break;
 
-	ptrace("funSize= %lu, i= %lu, fun= %p\n", 
+	ptrace("funSize= %lu, idx= %lu, fun= %p\n", 
 			funSize, funIdx, (void*)fun[funIdx]);
 
 	Errchk(cuLaunchKernel(fun[funIdx], 
@@ -295,7 +285,8 @@ cudaError_t cudaLaunch(const void *func)
 				blockDim.x, blockDim.y, blockDim.z, 
 				sharedMem, stream, para, NULL));
 	paraSize = 0;
-	time_end(__func__);
+
+	time_end(t_Launch);
 	return cudaSuccess;
 }
 
@@ -314,7 +305,7 @@ cudaError_t cudaGetDevice(int *device)
 	err = (*func_L)(device);
 
 	if( err != cudaSuccess ) error();
-	time_end(__func__);
+	time_end(t_GetDev);
 	return err;
 }
 
@@ -331,7 +322,7 @@ cudaError_t cudaMalloc(void** devPtr, size_t size)
 	ptrace("devPtr= %p, size= %lu\n", *devPtr, size);
 
 	if( err != cudaSuccess ) error();
-	time_end(__func__);
+	time_end(t_Malloc);
 	return err;
 }
 
@@ -347,7 +338,7 @@ cudaError_t cudaFree(void* devPtr)
 	err = (*func)(devPtr);
 
 	if( err != cudaSuccess ) error();
-	time_end(__func__);
+	time_end(t_Free);
 	return err;
 }
 /*
@@ -380,7 +371,12 @@ cudaError_t cudaMemcpy(void* dst, const void* src, size_t count,  enum cudaMemcp
 	err = (*func)(dst, src, count, kind);
 
 	if( err != cudaSuccess ) error();
-	time_end(__func__);
+
+	if(kind==1){
+		time_end(t_MemcpyH2D);
+	}else if(kind==2){
+		time_end(t_MemcpyD2H);
+	}
 	return err;
 }
 
@@ -396,7 +392,7 @@ cudaError_t cudaGetDeviceCount(int *count)
 	err = (*func_L)(count);
 
 	if( err != cudaSuccess ) error();
-	time_end(__func__);
+	time_end(t_GetDevCount);
 	return err;
 }
 
@@ -413,7 +409,7 @@ cudaError_t cudaSetDevice(int device)
 
 	if( err != cudaSuccess ) error();
 
-	time_end(__func__);
+	time_end(t_SetDev);
 	return err;
 }
 
@@ -428,7 +424,7 @@ cudaError_t cudaDriverGetVersion(int *driverVersion)
 	err = (*func_L)(driverVersion);
 
 	if( err != cudaSuccess ) error();
-	time_end(__func__);
+	time_end(t_DriverGetVersion);
 	return err;
 }
 
@@ -443,7 +439,7 @@ cudaError_t cudaRuntimeGetVersion(int *runtimeVersion)
 	err = (*func_L)(runtimeVersion);
 
 	if( err != cudaSuccess ) error();
-	time_end(__func__);
+	time_end(t_RuntimeGetVersion);
 	return err;
 }
 
@@ -459,7 +455,7 @@ cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device)
 	err = (*func_L)(prop, device);
 
 	if( err != cudaSuccess ) error();
-	time_end(__func__);
+	time_end(t_GetDevProp);
 	return err;
 }
 
@@ -474,7 +470,7 @@ cudaError_t cudaDeviceSynchronize(void)
 	err = (*func_L)();
 
 	if( err != cudaSuccess ) error();
-	time_end(__func__);
+	time_end(t_DevSync);
 	return err;
 }
 
@@ -489,7 +485,7 @@ cudaError_t cudaEventCreate(cudaEvent_t *event)
 	err = (*func_L)(event);
 
 	if( err != cudaSuccess ) error();
-	time_end(__func__);
+	time_end(t_EventCreate);
 	return err;
 }
 
@@ -504,7 +500,7 @@ cudaError_t cudaEventRecord(cudaEvent_t event,	cudaStream_t stream)
 	err = (*func_L)(event, stream);
 
 	if( err != cudaSuccess ) error();
-	time_end(__func__);
+	time_end(t_EventRecord);
 	return err;
 }
 
@@ -519,7 +515,7 @@ cudaError_t cudaEventSynchronize(cudaEvent_t event)
 	err = (*func_L)(event);
 
 	if( err != cudaSuccess ) error();
-	time_end(__func__);
+	time_end(t_EventSync);
 	return err;
 }
 
@@ -535,7 +531,7 @@ cudaError_t cudaEventElapsedTime(float *ms,	cudaEvent_t start, cudaEvent_t end)
 	err = (*func_L)(ms, start, end);
 
 	if( err != cudaSuccess ) error();
-	time_end(__func__);
+	time_end(t_EventElapsedTime);
 	return err;
 }
 
@@ -550,7 +546,7 @@ cudaError_t cudaEventDestroy(cudaEvent_t event)
 	err = (*func_L)(event);
 
 	if( err != cudaSuccess ) error();
-	time_end(__func__);
+	time_end(t_EventDestroy);
 	return err;
 }
 
@@ -565,7 +561,7 @@ cudaError_t cudaDeviceReset(void)
 	err = (*func_L)();
 
 	if( err != cudaSuccess ) error();
-	time_end(__func__);
+	time_end(t_DevReset);
 	return err;
 }
 
@@ -580,7 +576,7 @@ cudaError_t cudaGetLastError(void)
 	err = (*func_L)();
 
 	if( err != cudaSuccess ) error();
-	time_end(__func__);
+	time_end(t_GetLastError);
 	return err;
 }
 

@@ -1,8 +1,10 @@
 #!/bin/bash
 
+f=memcpy_data_host.txt
+
 make memcpy
 
-rm -rf memcpy_data
+rm -rf $f
 
 for i in $(seq 1 10)
 do
@@ -11,15 +13,20 @@ do
 	for (( j=1; j<=512; j=j*2 ))
 	do
 		echo "    ${j}KB"
-		./memcpy ${j}k >> memcpy_data
-		sleep 2
+		sp=`./memcpy ${j}k`
+		echo "${j}K $sp" >> $f
 	done
 
-	for (( j=1; j<=1024; j=j*2 ))
+	for (( j=1; j<=512; j=j*2 ))
 	do
 		echo "    ${j}MB"
-		./memcpy ${j}m >> memcpy_data
-		sleep 2
+		sp=`./memcpy ${j}m`
+		echo "${j}M $sp" >> $f
 	done
+
+	j=1
+	echo "    ${j}GB"
+	sp=`./memcpy ${j}g`
+	echo "${j}G $sp" >> $f
 
 done

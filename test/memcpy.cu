@@ -8,6 +8,8 @@
 #include <ctype.h> // isalpha
 #include <sys/time.h>
 #include <unistd.h>
+
+/*
 #define time_define() struct timeval timeval_begin
 #define time_begin() gettimeofday (&timeval_begin, NULL);
 #define time_end() ({ \
@@ -15,6 +17,7 @@
 		gettimeofday (&timeval_end, NULL); \
 		(double)((timeval_end.tv_sec-timeval_begin.tv_sec)+((timeval_end.tv_usec-timeval_begin.tv_usec)/1000000.0)); \
 		})
+*/
 
 #define KB (1UL<<10)
 #define MB (1UL<<20)
@@ -50,7 +53,7 @@ void get_data_size(int *N, size_t *size, char u[4], int argc, char* argv[])
 }
 int main(int argc, char* argv[])
 {
-	double time_h2d, time_d2h;
+//	double time_h2d, time_d2h;
 	size_t size, err_num;
 	int i, N;
 	char unit[4];
@@ -59,7 +62,7 @@ int main(int argc, char* argv[])
 
 	get_data_size(&N, &size, unit, argc, argv);
 
-	time_define();
+//	time_define();
 
 	h = (unsigned char*)malloc(size);
 
@@ -73,23 +76,23 @@ int main(int argc, char* argv[])
 	}
 
 	//#######################################################
-	time_begin();
+//	time_begin();
 	err = cudaMemcpy(d, h, size, cudaMemcpyHostToDevice );
 	if( err != cudaSuccess){
 		printf("H2D fa1iled err= %d\n", err);
 	}
-	time_h2d = time_end();
+//	time_h2d = time_end();
 	//#######################################################
 
 	memset(h, 0, size); // kernel
 
 	//#######################################################
-	time_begin();
+//	time_begin();
 	err = cudaMemcpy(h, d, size, cudaMemcpyDeviceToHost );
 	if( err != cudaSuccess){
 		printf("D2H fa1iled i= %d, err= %d\n", i, err);
 	}
-	time_d2h = time_end();
+//	time_d2h = time_end();
 	//#######################################################
 
 	if(size<32)
@@ -120,7 +123,7 @@ int main(int argc, char* argv[])
 	printf("H2D= %f MB/sec, %f sec\n", size/(MB*time_h2d), time_h2d);
 	printf("D2H= %f MB/sec, %f sec\n", size/(MB*time_d2h), time_d2h);
 #else
-	printf("%.3f\t%.3f\t%.3f\t\n", (double)size/KB, (double)size/(MB*time_h2d), (double)size/(MB*time_d2h));
+	//printf("%.3f\t%.3f\t%.3f\t\n", (double)size/KB, (double)size/(MB*time_h2d), (double)size/(MB*time_d2h));
 #endif
 
 	err = cudaFree(d);

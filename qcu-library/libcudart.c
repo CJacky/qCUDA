@@ -12,45 +12,25 @@
 #include <__cudaFatFormat.h>
 #include <fatBinaryCtl.h>
 
-#define	PFUNC	0
-#define PTRACE	0
+#include "time_measure.h"
 #include "../qcu-driver/qcuda_common.h"
+
+#if 0
+#define pfunc() printf("### %s : %d\n", __func__, __LINE__)
+#else
+#define pfunc()
+#endif
+
+#if 0
+#define ptrace(fmt, arg...) \
+	printf("    ### " fmt, ##arg)
+#else
+#define ptrace(fmt, arg...)
+#endif
 
 #define dev_path "/dev/qcuda"
 
 #define error(fmt, arg...) printf("ERROR: "fmt, ##arg)
-
-#if 1
-struct timeval timeval_begin, timeval_end;
-#include <sys/time.h>
-#define time_begin() gettimeofday (&timeval_begin, NULL)
-
-
-#define time_end(str) 	\
-	gettimeofday (&timeval_end, NULL); \
-	printf("%u ", \
-			(unsigned int)((timeval_end.tv_sec  - timeval_begin.tv_sec)*1000000 + \
-						  (timeval_end.tv_usec - timeval_begin.tv_usec)))
-#else
-#define time_begin()
-#define time_end(str)
-#endif
-
-#if 1
-struct timeval timeval_begin, timeval_end;
-#undef time_begin
-#undef time_end
-#include <sys/time.h>
-#define time_begin() gettimeofday (&timeval_begin, NULL)
-#define time_end() 	\
-	gettimeofday (&timeval_end, NULL); \
-	printf("%u ", \
-		(unsigned int)((timeval_end.tv_sec  - timeval_begin.tv_sec)*1000000 + \
-	 				   (timeval_end.tv_usec - timeval_begin.tv_usec)))
-#else
-#define time_begin()
-#define time_end()
-#endif
 
 #define ptr( p , v, s) \
 	p = (uint64_t)v; \
@@ -67,20 +47,26 @@ uint32_t cudaParaNum = 0;
 
 void open_device()
 {
-	if( fd == -1)
+	fd = open(dev_path, O_RDWR);
+	if( fd < 0 )
 	{
-		fd = open(dev_path, O_RDWR);
-		if( fd < 0 )
-		{
-			error("open device %s faild, %s (%d)\n", dev_path, strerror(errno), errno);
-			exit (EXIT_FAILURE);
-		}
+		error("open device %s faild, %s (%d)\n", dev_path, strerror(errno), errno);
+		exit (EXIT_FAILURE);
 	}
 }
 
 void close_device()
 {
 	close(fd);
+	time_fini();
+}
+
+void send_cmd_to_device(int cmd, VirtioQCArg *arg)
+{
+	if(__builtin_expect(!!(fd==-1), 0))
+		open_device();
+
+	ioctl(fd, cmd, arg);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -91,9 +77,9 @@ void** __cudaRegisterFatBinary(void *fatCubin)
 {
 	unsigned int magic;
 	void **fatCubinHandle;
+	time_init();
 	pfunc();
 	time_begin();
-	open_device();
 
 	magic = *(unsigned int*)fatCubin;
 	fatCubinHandle = malloc(sizeof(void*));
@@ -124,11 +110,10 @@ computeFatBinaryFormat_t binary = (computeFatBinaryFormat_t)fatCubin;
 		exit(EXIT_FAILURE);
 	}
 
-	ioctl(fd, VIRTQC_cudaRegisterFatBinary, NULL);
-	ptrace("ioctl finish\n");
+	send_cmd_to_device( VIRTQC_cudaRegisterFatBinary, NULL);
 
 	// the pointer value is cubin ELF entry point
-	time_end();
+	time_end(t_RegFatbin);
 	return fatCubinHandle;
 }
 
@@ -139,11 +124,11 @@ void __cudaUnregisterFatBinary(void **fatCubinHandle)
 	time_begin();
 
 	ptrace("fatCubinHandle= %p, value= %p\n", fatCubinHandle, *fatCubinHandle);
-	ioctl(fd, VIRTQC_cudaUnregisterFatBinary, NULL);
+	send_cmd_to_device( VIRTQC_cudaUnregisterFatBinary, NULL);
 
 	free(fatCubinHandle);
+	time_end(t_UnregFatbin);
 	close_device();
-	time_end();
 }
 
 void __cudaRegisterFunction(
@@ -194,7 +179,8 @@ void __cudaRegisterFunction(
 	//	ptrace("pA= %p, pASize= %u, pB= %p, pBSize= %u\n", 
 	//			(void*)arg.pA, arg.pASize, (void*)arg.pB, arg.pBSize);
 
-	ioctl(fd, VIRTQC_cudaRegisterFunction, &arg);
+	send_cmd_to_device( VIRTQC_cudaRegisterFunction, &arg);
+	time_end(t_RegFunc);
 }
 
 cudaError_t cudaConfigureCall(
@@ -222,7 +208,7 @@ cudaError_t cudaConfigureCall(
 
 	cudaKernelConf[6] = sharedMem;
 
-	time_end();
+	time_end(t_ConfigCall);
 	return cudaSuccess;
 }
 
@@ -274,6 +260,7 @@ cudaError_t cudaSetupArgument(
 
 	cudaParaNum++;
 
+	time_end(t_SetArg);
 	return cudaSuccess;
 }
 
@@ -287,10 +274,10 @@ cudaError_t cudaLaunch(const void *func)
 	ptr( arg.pA, cudaKernelConf, 7*sizeof(uint32_t));
 	ptr( arg.pB, cudaKernelPara, cudaParaNum*sizeof(uint64_t));
 
-	ioctl(fd, VIRTQC_cudaLaunch, &arg);
+	send_cmd_to_device( VIRTQC_cudaLaunch, &arg);
 	cudaParaNum = 0;
 
-	time_end();
+	time_end(t_Launch);
 	return cudaSuccess;
 }
 
@@ -308,11 +295,11 @@ cudaError_t cudaMalloc(void** devPtr, size_t size)
 	ptr( arg.pA, 0,  0);
 	arg.flag = size;
 
-	ioctl(fd, VIRTQC_cudaMalloc, &arg);
+	send_cmd_to_device( VIRTQC_cudaMalloc, &arg);
 	*devPtr = (void*)arg.pA;
 	ptrace("devPtr= %p\n", (void*)arg.pA);
 
-	time_end();
+	time_end(t_Malloc);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -325,10 +312,10 @@ cudaError_t cudaFree(void* devPtr)
 	memset(&arg, 0, sizeof(VirtioQCArg));
 	ptr( arg.pA, devPtr, 0);
 
-	ioctl(fd, VIRTQC_cudaFree, &arg);
+	send_cmd_to_device( VIRTQC_cudaFree, &arg);
 	ptrace("devPtr= %p\n", (void*)arg.pA);
 
-	time_end();
+	time_end(t_Free);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -370,9 +357,13 @@ cudaError_t cudaMemcpy(
 		return cudaErrorInvalidValue;
 	}
 
-	ioctl(fd, VIRTQC_cudaMemcpy, &arg);
+	send_cmd_to_device( VIRTQC_cudaMemcpy, &arg);
 
-	time_end();
+	if(kind==1){
+		time_end(t_MemcpyH2D);
+	}else if(kind==2){
+		time_end(t_MemcpyD2H);
+	}
 	return (cudaError_t)arg.cmd;
 }
 
@@ -388,10 +379,10 @@ cudaError_t cudaGetDevice(int *device)
 
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
-	ioctl(fd, VIRTQC_cudaGetDevice, &arg);
+	send_cmd_to_device( VIRTQC_cudaGetDevice, &arg);
 	*device = (int)arg.pA;
 
-	time_end();
+	time_end(t_GetDev);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -403,10 +394,10 @@ cudaError_t cudaGetDeviceCount(int *count)
 
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
-	ioctl(fd, VIRTQC_cudaGetDeviceCount, &arg);
+	send_cmd_to_device( VIRTQC_cudaGetDeviceCount, &arg);
 	*count = (int)arg.pA;
 
-	time_end();
+	time_end(t_GetDevCount);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -415,13 +406,12 @@ cudaError_t cudaSetDevice(int device)
 	VirtioQCArg arg;
 	pfunc();
 	time_begin();
-	open_device();
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
 	ptr( arg.pA, device, 0);
-	ioctl(fd, VIRTQC_cudaSetDevice, &arg);
+	send_cmd_to_device( VIRTQC_cudaSetDevice, &arg);
 
-	time_end();
+	time_end(t_SetDev);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -435,9 +425,9 @@ cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device)
 
 	ptr( arg.pA, prop, sizeof(struct cudaDeviceProp));
 	ptr( arg.pB, device, 0);
-	ioctl(fd, VIRTQC_cudaGetDeviceProperties, &arg);
+	send_cmd_to_device( VIRTQC_cudaGetDeviceProperties, &arg);
 
-	time_end();
+	time_end(t_GetDevProp);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -449,9 +439,9 @@ cudaError_t cudaDeviceSynchronize(void)
 
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
-	ioctl(fd, VIRTQC_cudaDeviceSynchronize, &arg);
+	send_cmd_to_device( VIRTQC_cudaDeviceSynchronize, &arg);
 
-	time_end();
+	time_end(t_DevSync);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -463,9 +453,9 @@ cudaError_t cudaDeviceReset(void)
 
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
-	ioctl(fd, VIRTQC_cudaDeviceReset, &arg);
+	send_cmd_to_device( VIRTQC_cudaDeviceReset, &arg);
 
-	time_end();
+	time_end(t_DevReset);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -481,10 +471,10 @@ cudaError_t cudaDriverGetVersion(int *driverVersion)
 
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
-	ioctl(fd, VIRTQC_cudaDriverGetVersion, &arg);
+	send_cmd_to_device( VIRTQC_cudaDriverGetVersion, &arg);
 	*driverVersion = (int)arg.pA;
 
-	time_end();
+	time_end(t_DriverGetVersion);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -496,10 +486,10 @@ cudaError_t cudaRuntimeGetVersion(int *runtimeVersion)
 
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
-	ioctl(fd, VIRTQC_cudaRuntimeGetVersion, &arg);
+	send_cmd_to_device( VIRTQC_cudaRuntimeGetVersion, &arg);
 	*runtimeVersion = (uint64_t)arg.pA;
 
-	time_end();
+	time_end(t_RuntimeGetVersion);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -515,10 +505,10 @@ cudaError_t cudaEventCreate(cudaEvent_t *event)
 
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
-	ioctl(fd, VIRTQC_cudaEventCreate, &arg);
+	send_cmd_to_device( VIRTQC_cudaEventCreate, &arg);
 	*event = (void*)arg.pA;
 
-	time_end();
+	time_end(t_EventCreate);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -532,9 +522,9 @@ cudaError_t cudaEventRecord	(cudaEvent_t event,	cudaStream_t stream)
 
 	ptr( arg.pA, event, 0);
 	ptr( arg.pB, stream, 0);
-	ioctl(fd, VIRTQC_cudaEventRecord, &arg);
+	send_cmd_to_device( VIRTQC_cudaEventRecord, &arg);
 
-	time_end();
+	time_end(t_EventRecord);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -547,9 +537,9 @@ cudaError_t cudaEventSynchronize(cudaEvent_t event)
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
 	ptr( arg.pA, event, 0);
-	ioctl(fd, VIRTQC_cudaEventSynchronize, &arg);
+	send_cmd_to_device( VIRTQC_cudaEventSynchronize, &arg);
 
-	time_end();
+	time_end(t_EventSync);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -563,11 +553,11 @@ cudaError_t cudaEventElapsedTime(float *ms,	cudaEvent_t start, cudaEvent_t end)
 
 	ptr( arg.pA, start, 0);
 	ptr( arg.pB, end, 0);
-	ioctl(fd, VIRTQC_cudaEventElapsedTime, &arg);
+	send_cmd_to_device( VIRTQC_cudaEventElapsedTime, &arg);
 
 	memcpy(ms, &arg.flag, sizeof(float));
 
-	time_end();
+	time_end(t_EventElapsedTime);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -580,9 +570,9 @@ cudaError_t cudaEventDestroy(cudaEvent_t event)
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
 	ptr( arg.pA, event, 0);
-	ioctl(fd, VIRTQC_cudaEventDestroy, &arg);
+	send_cmd_to_device( VIRTQC_cudaEventDestroy, &arg);
 
-	time_end();
+	time_end(t_EventDestroy);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -598,9 +588,9 @@ cudaError_t cudaGetLastError(void)
 
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
-	ioctl(fd, VIRTQC_cudaGetLastError, &arg);
+	send_cmd_to_device( VIRTQC_cudaGetLastError, &arg);
 
-	time_end();
+	time_end(t_GetLastError);
 	return (cudaError_t)arg.cmd;
 }
 

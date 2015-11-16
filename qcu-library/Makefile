@@ -3,7 +3,7 @@ CUDA_INC=/usr/local/cuda/include
 
 LIB=libcudart_dl
 
-all: lib link
+all: lib install
 
 libcudart_dl:
 	gcc -c -Wall -Werror -fpic -I$(CUDA_INC) $(LIB).c
@@ -19,9 +19,10 @@ libcudart:
 
 lib: $(LIB)
 
-link: 
+install: 
 	sudo cp libcudart.so /usr/local/lib/
 	sudo ln -sf libcudart.so /usr/local/lib/libcudart.so.7.5
+	sudo rm -f /etc/ld.so.conf.d/cuda-7.5.conf
 	sudo ldconfig
 
 clean:
@@ -29,6 +30,7 @@ clean:
 
 remove:
 	sudo rm -f /usr/local/lib/libcudart.so /usr/local/lib/libcudart.so.7.5
+	sudo su -c "echo "/usr/local/cuda/lib64" > /etc/ld.so.conf.d/cuda-7.5.conf"
 	sudo ldconfig
 
 #/usr/local/cuda/bin/nvcc --cudart=shared $(USR).c

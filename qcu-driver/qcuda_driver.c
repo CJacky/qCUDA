@@ -19,9 +19,21 @@
 #include <linux/random.h>
 #include <linux/io.h>
 
-#define PFUNC	0
-#define	PTRACE	0
 #include "qcuda_common.h"
+
+#if 0
+#define pfunc() printk("### %s : %d\n", __func__, __LINE__)
+#else
+#define pfunc()
+#endif
+
+#if 0
+#define ptrace(fmt, arg...) \
+	printk("    ### " fmt, ##arg)
+#else
+#define ptrace(fmt, arg...)
+#endif
+
 
 #define error(fmt, arg...) \
 	printk("### func= %-30s ,line= %-4d ," fmt, __func__,  __LINE__, ##arg)
@@ -240,6 +252,7 @@ static int qcu_misc_send_cmd(VirtioQCArg *req)
 		goto out;
 	}
 
+	// TODO: do not use busy waiting
 	while (!virtqueue_get_buf(qcu->vq, &len) &&	!virtqueue_is_broken(qcu->vq))
 		cpu_relax();
 

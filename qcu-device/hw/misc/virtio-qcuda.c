@@ -11,8 +11,20 @@
 #include <builtin_types.h>
 #endif
 
-#define PFUNC	0
-#define PTRACE	0
+#if 0
+#define pfunc() printf("### %s : %d\n", __func__, __LINE__)
+#else
+#define pfunc()
+#endif
+
+#if 0
+#define ptrace(fmt, arg...) \
+	printf("    ### " fmt, ##arg)
+#else
+#define ptrace(fmt, arg...)
+#endif
+
+
 #include "../../../qcu-driver/qcuda_common.h"
 
 #define error(fmt, arg...) \
