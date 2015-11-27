@@ -16,14 +16,14 @@
 #include "../qcu-driver/qcuda_common.h"
 
 #if 0
-#define pfunc() printf("### %s : %d\n", __func__, __LINE__)
+#define pfunc() printf("### %s at line %d\n", __func__, __LINE__)
 #else
 #define pfunc()
 #endif
 
 #if 0
 #define ptrace(fmt, arg...) \
-	printf("    ### " fmt, ##arg)
+	printf("    " fmt, ##arg)
 #else
 #define ptrace(fmt, arg...)
 #endif
@@ -37,9 +37,12 @@
 	p##Size = (uint32_t)s;
 
 int fd = -1;
+
 uint32_t cudaKernelConf[7];
-uint64_t cudaKernelPara[16];
-uint32_t cudaParaNum = 0;
+
+#define cudaKernelParaMaxSize 128
+uint8_t cudaKernelPara[ cudaKernelParaMaxSize ];
+uint32_t cudaParaSize;
 
 ////////////////////////////////////////////////////////////////////////////////
 /// General Function
@@ -175,9 +178,10 @@ void __cudaRegisterFunction(
 
 	ptr( arg.pA , fatBinHeader, fatBinHeader->fatSize);
 	ptr( arg.pB , deviceName  , strlen(deviceName)+1 );
+	arg.flag = (uint32_t)(uint64_t)hostFun;
 
-	//	ptrace("pA= %p, pASize= %u, pB= %p, pBSize= %u\n", 
-	//			(void*)arg.pA, arg.pASize, (void*)arg.pB, arg.pBSize);
+		ptrace("pA= %p, pASize= %u, pB= %p, pBSize= %u\n", 
+				(void*)arg.pA, arg.pASize, (void*)arg.pB, arg.pBSize);
 
 	send_cmd_to_device( VIRTQC_cudaRegisterFunction, &arg);
 	time_end(t_RegFunc);
@@ -208,6 +212,9 @@ cudaError_t cudaConfigureCall(
 
 	cudaKernelConf[6] = sharedMem;
 
+	memset(cudaKernelPara, 0, cudaKernelParaMaxSize);
+	cudaParaSize = sizeof(uint32_t);
+
 	time_end(t_ConfigCall);
 	return cudaSuccess;
 }
@@ -218,47 +225,24 @@ cudaError_t cudaSetupArgument(
 		size_t offset)
 {
 	pfunc();
-	/*
-	   switch(size)
-	   {
-	   case 4:
-	   ptrace("    arg= %p, value= %u\n", arg, *(unsigned int*)arg);
-	   break;
-	   case 8:
-	   ptrace("    arg= %p, value= %llx\n", arg, *(unsigned long long*)arg);
-	   break;
-	   }
+/*
+	cudaKernelPara:
+	     uint32_t      uint32_t                   uint32_t
+	=============================================================================
+	| number of arg | arg1 size |  arg1 data  |  arg2 size  |  arg2 data  | .....
+	=============================================================================
+*/
+	// set data size
+	memcpy(&cudaKernelPara[cudaParaSize], &size, sizeof(uint32_t));
+	ptrace("size= %u\n", *(uint32_t*)&cudaKernelPara[cudaParaSize]);
+	cudaParaSize += sizeof(uint32_t);
 
-	   ptrace("    size= %lu\n", size);
-	   ptrace("    offset= %lu\n", offset);
-	 */
-	//	uint64_t *buf = (uint64_t*)&cudaKernelConf[7];
-	/*
-	   switch(size)
-	   {
-	   case 4: buf[ cudaParaNum ] = *(uint32_t*)arg;
-	   case 8: buf[ cudaParaNum ] = *(uint64_t*)arg;
-	   default:
-	   ptrace("    unknow data size %lu\n", size);
-	   }*/
+	// set data 
+	memcpy(&cudaKernelPara[cudaParaSize], arg, size);
+	ptrace("value= %llx\n", *(unsigned long long*)&cudaKernelPara[cudaParaSize]);
+	cudaParaSize += size;
 
-	if( size == 4 )
-	{
-		cudaKernelPara[ cudaParaNum ] = *(uint32_t*)arg;
-	}
-	else if( size == 8 )
-	{
-		cudaKernelPara[ cudaParaNum ] = *(uint64_t*)arg;
-	}
-	else
-	{
-		ptrace("unknow data size %lu\n", size);
-	}
-
-	ptrace("para %u = %llx\n", cudaParaNum, 
-			(unsigned long long)cudaKernelPara[cudaParaNum]);
-
-	cudaParaNum++;
+	(*((uint32_t*)cudaKernelPara))++;
 
 	time_end(t_SetArg);
 	return cudaSuccess;
@@ -272,10 +256,10 @@ cudaError_t cudaLaunch(const void *func)
 
 	memset(&arg, 0, sizeof(VirtioQCArg));
 	ptr( arg.pA, cudaKernelConf, 7*sizeof(uint32_t));
-	ptr( arg.pB, cudaKernelPara, cudaParaNum*sizeof(uint64_t));
+	ptr( arg.pB, cudaKernelPara, cudaParaSize);
+	arg.flag = (uint32_t)(uint64_t)func;
 
 	send_cmd_to_device( VIRTQC_cudaLaunch, &arg);
-	cudaParaNum = 0;
 
 	time_end(t_Launch);
 	return cudaSuccess;
@@ -592,5 +576,10 @@ cudaError_t cudaGetLastError(void)
 
 	time_end(t_GetLastError);
 	return (cudaError_t)arg.cmd;
+}
+
+const char* cudaGetErrorString(cudaError_t 	error)
+{
+	return "Not yet implement";
 }
 

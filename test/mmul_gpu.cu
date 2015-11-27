@@ -7,9 +7,7 @@
 #define b(i, j) ((i)*z+(j))
 #define c(i, j) ((i)*z+(j))
 
-#ifndef DUMP_FILE
-#define DUMP_FILE 0
-#endif
+#define DUMP_FILE 1
 
 typedef int elem_t;
 
@@ -69,22 +67,22 @@ int main(int argc, char* argv[])
 	cudaMemcpy(B_d, B_h, y*z*sizeof(elem_t), cudaMemcpyHostToDevice);
 	//cudaMemcpy(C_d, C_h, x*z*sizeof(elem_t), cudaMemcpyHostToDevice);
 
-
 	dim3 threads(32, 32);
 	dim3 blocks( (x%32)?x/32+1:x/32, (z%32)?z/32+1:z/32);
 	
-
 	matrixMul <<< blocks, threads >>>(A_d, B_d, C_d, x, y, z);
-
 
 	cudaMemcpy(C_h, C_d, x*z*sizeof(elem_t), cudaMemcpyDeviceToHost);
 
 //********************************************************************
 
 #if DUMP_FILE
-	FILE *f = fopen("mmul_gpu_out", "w");
+	char fname[32];
+	FILE *f;
 	int j;
 
+	sprintf(fname, "mmul_gpu_%d", x);
+	f = fopen(fname, "w");
 	fprintf(f, "%d %d %d\n", x, y, z);
 	for(i=0; i<((x>y)?x:y); i++)
 	{

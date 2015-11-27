@@ -29,7 +29,7 @@
 
 #if 0
 #define ptrace(fmt, arg...) \
-	printk("    ### " fmt, ##arg)
+	printk("    " fmt, ##arg)
 #else
 #define ptrace(fmt, arg...)
 #endif

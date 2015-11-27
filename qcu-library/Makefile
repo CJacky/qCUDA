@@ -1,17 +1,13 @@
 
 CUDA_INC=/usr/local/cuda/include
 
-LIB=libcudart_dl
+LIB=libcudart
 
 all: lib install
 
 libcudart_dl:
 	gcc -c -Wall -Werror -fpic -I$(CUDA_INC) $(LIB).c
 	gcc -shared -o libcudart.so $(LIB).o -lcuda -ldl
-
-libcudart_cu:
-	gcc -c -Wall -Werror -fpic -I$(CUDA_INC) $(LIB).c
-	gcc -shared -o libcudart.so $(LIB).o -lcuda
 
 libcudart:
 	gcc -c -Wall -Werror -fpic -I$(CUDA_INC) $(LIB).c

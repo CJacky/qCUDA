@@ -12,14 +12,14 @@
 #endif
 
 #if 0
-#define pfunc() printf("### %s : %d\n", __func__, __LINE__)
+#define pfunc() printf("### %s at line %d\n", __func__, __LINE__)
 #else
 #define pfunc()
 #endif
 
 #if 0
 #define ptrace(fmt, arg...) \
-	printf("    ### " fmt, ##arg)
+	printf("    " fmt, ##arg)
 #else
 #define ptrace(fmt, arg...)
 #endif
@@ -57,7 +57,7 @@ CUmodule cudaModule;
 
 #define cudaFunctionMaxNum 8
 CUfunction cudaFunction[cudaFunctionMaxNum];
-uint64_t cudaFunctionId[cudaFunctionMaxNum];
+uint32_t cudaFunctionId[cudaFunctionMaxNum];
 uint32_t cudaFunctionNum;
 
 #define cudaEventMaxNum 16
@@ -155,20 +155,30 @@ static void qcu_cudaRegisterFunction(VirtioQCArg *arg)
 static void qcu_cudaLaunch(VirtioQCArg *arg)
 {
 	unsigned int *conf;
-	uint64_t *para, funcId;
-	uint32_t paraSize, funcIdx;
+	uint8_t *para;
+	uint32_t funcId, paraNum, paraIdx, funcIdx;
 	void **paraBuf;
 	int i;
 	pfunc();
 
 	conf = gpa_to_hva(arg->pA);
 	para = gpa_to_hva(arg->pB);
-	paraSize = (arg->pBSize)/sizeof(uint64_t);
+	paraNum = *((uint32_t*)para);
 	funcId = arg->flag;
+	
+	ptrace("paraNum= %u\n", paraNum);
 
-	paraBuf = malloc(sizeof(void*)*paraSize);
-	for(i=0; i<paraSize; i++)
-		paraBuf[i] = &para[i];
+	paraBuf = malloc(paraNum*sizeof(void*));
+	paraIdx = sizeof(uint32_t);
+
+	for(i=0; i<paraNum; i++)
+	{
+		paraBuf[i] = &para[paraIdx+sizeof(uint32_t)];
+		ptrace("arg %d = 0x%llx size= %u byte\n", i, 
+			*(unsigned long long*)paraBuf[i], *(unsigned int*)&para[paraIdx]);
+
+		paraIdx += *((uint32_t*)&para[paraIdx]) + sizeof(uint32_t);
+	}
 
 	for(funcIdx=0; funcIdx<cudaFunctionNum; funcIdx++)
 	{
@@ -179,10 +189,6 @@ static void qcu_cudaLaunch(VirtioQCArg *arg)
 	ptrace("grid (%u %u %u) block(%u %u %u) sharedMem(%u)\n", 
 			conf[0], conf[1], conf[2], conf[3], conf[4], conf[5], conf[6]);
 
-	/*
-	for(i=0; i<paraSize; i++)
-		ptrace("    para %d = %llu\n", i, *(unsigned long long*)paraBuf[i]);
-	*/	
 
 	cuError( cuLaunchKernel(cudaFunction[funcIdx],
 				conf[0], conf[1], conf[2],
@@ -203,7 +209,7 @@ static void qcu_cudaMalloc(VirtioQCArg *arg)
 	void* devPtr;
 	pfunc();
 
-	count = arg->flag;;
+	count = arg->flag;
 	cudaError((err = cudaMalloc( &devPtr, count )));
 	arg->cmd = err;
 	arg->pA = (uint64_t)devPtr;
@@ -507,7 +513,7 @@ static int qcu_cmd_write(VirtioQCArg *arg)
 		free(deviceSpace);	
 	}
 
-	deviceSpaceSize = size;;
+	deviceSpaceSize = size;
 	deviceSpace = (char*)malloc(deviceSpaceSize);
 
 	if( size > deviceSpaceSize )

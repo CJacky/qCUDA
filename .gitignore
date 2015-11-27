@@ -107,4 +107,5 @@ TAGS
 *~
 /test/answer/*
 /test/data/*
-/test/nvidia_simples/*
+/test/nvidia_samples/*
+/demo/*
