@@ -1,0 +1,1088 @@
+diff -Nur -x .gitignore -x .gitmodules -x pc-bios -x pixman -x roms qemu-2.4.0/configure ../qCUDA/qcu-device/configure
+--- qemu-2.4.0/configure	2015-08-12 03:11:05.000000000 +0800
++++ ../qCUDA/qcu-device/configure	2015-11-11 15:23:09.766823638 +0800
+@@ -338,6 +338,7 @@
+ vhdx=""
+ numa=""
+ tcmalloc="no"
++cuda="no"
+ 
+ # parse CC options first
+ for opt do
+@@ -1149,6 +1150,8 @@
+   ;;
+   --enable-tcmalloc) tcmalloc="yes"
+   ;;
++  --enable-cuda) cuda="yes"
++  ;;
+   *)
+       echo "ERROR: unknown option $opt"
+       echo "Try '$0 --help' for more information"
+@@ -3378,6 +3381,14 @@
+ fi
+ 
+ ##########################################
++# CUDA probe: CJacky
++if test "$cuda" = "yes" ; then
++	LIBS="-lcuda -lcudart $LIBS"
++	LDFLAGS="-L/usr/local/cuda/lib64 $LDFLAGS"
++	QEMU_CFLAGS="-I/usr/local/cuda/include $QEMU_CFLAGS"
++fi
++
++##########################################
+ # signalfd probe
+ signalfd="no"
+ cat > $TMPC << EOF
+@@ -4589,6 +4600,7 @@
+ echo "bzip2 support     $bzip2"
+ echo "NUMA host support $numa"
+ echo "tcmalloc support  $tcmalloc"
++echo "CUDA support      $cuda"
+ 
+ if test "$sdl_too_old" = "yes"; then
+ echo "-> Your SDL version is too old - please upgrade to have SDL support"
+@@ -4624,6 +4636,9 @@
+ 
+ echo "ARCH=$ARCH" >> $config_host_mak
+ 
++if test "$cuda" = "yes" ; then
++  echo "CONFIG_CUDA=y" >> $config_host_mak
++fi
+ if test "$debug_tcg" = "yes" ; then
+   echo "CONFIG_DEBUG_TCG=y" >> $config_host_mak
+ fi
+diff -Nur -x .gitignore -x .gitmodules -x pc-bios -x pixman -x roms qemu-2.4.0/go.build ../qCUDA/qcu-device/go.build
+--- qemu-2.4.0/go.build	1970-01-01 08:00:00.000000000 +0800
++++ ../qCUDA/qcu-device/go.build	2015-11-10 00:41:01.859716320 +0800
+@@ -0,0 +1,8 @@
++#!/bin/bash
++set -e
++set -x
++
++./configure --prefix=/opt/qemu-2.4.0 --target-list=x86_64-softmmu --enable-kvm --disable-xen --enable-debug --enable-debug-info --enable-cuda
++make -j 24
++#sudo make install
++
+diff -Nur -x .gitignore -x .gitmodules -x pc-bios -x pixman -x roms qemu-2.4.0/hw/misc/Makefile.objs ../qCUDA/qcu-device/hw/misc/Makefile.objs
+--- qemu-2.4.0/hw/misc/Makefile.objs	2015-08-12 03:11:07.000000000 +0800
++++ ../qCUDA/qcu-device/hw/misc/Makefile.objs	2015-11-11 14:37:30.526919830 +0800
+@@ -40,3 +40,5 @@
+ 
+ obj-$(CONFIG_PVPANIC) += pvpanic.o
+ obj-$(CONFIG_EDU) += edu.o
++
++obj-$(CONFIG_VIRTIO) += virtio-qcuda.o
+diff -Nur -x .gitignore -x .gitmodules -x pc-bios -x pixman -x roms qemu-2.4.0/hw/misc/virtio-qcuda.c ../qCUDA/qcu-device/hw/misc/virtio-qcuda.c
+--- qemu-2.4.0/hw/misc/virtio-qcuda.c	1970-01-01 08:00:00.000000000 +0800
++++ ../qCUDA/qcu-device/hw/misc/virtio-qcuda.c	2015-11-28 00:34:32.960151574 +0800
+@@ -0,0 +1,844 @@
++#include "qemu-common.h"
++#include "qemu/iov.h"
++#include "qemu/error-report.h"
++#include "hw/virtio/virtio.h"
++#include "hw/virtio/virtio-bus.h"
++#include "hw/virtio/virtio-qcuda.h"
++
++#ifdef CONFIG_CUDA
++#include <cuda.h>
++#include <cuda_runtime.h>
++#include <builtin_types.h>
++#endif
++
++#if 0
++#define pfunc() printf("### %s at line %d\n", __func__, __LINE__)
++#else
++#define pfunc()
++#endif
++
++#if 0
++#define ptrace(fmt, arg...) \
++	printf("    " fmt, ##arg)
++#else
++#define ptrace(fmt, arg...)
++#endif
++
++
++#include "../../../qcu-driver/qcuda_common.h"
++
++#define error(fmt, arg...) \
++	error_report("file %s ,line %d ,ERROR: "fmt, __FILE__, __LINE__, ##arg)
++
++#ifndef MIN
++#define MIN(a,b) ({ ((a)<(b))? (a):(b) })
++#endif
++
++char *deviceSpace = NULL;
++uint32_t deviceSpaceSize = 0;
++
++static void* gpa_to_hva(uint64_t pa) 
++{
++	MemoryRegionSection section;
++
++	section = memory_region_find(get_system_memory(), (ram_addr_t)pa, 1);
++	if ( !int128_nz(section.size) || !memory_region_is_ram(section.mr)){
++		error("addr %p in rom\n", (void*)pa); 
++		return 0;
++	}
++
++	return (memory_region_get_ram_ptr(section.mr) + section.offset_within_region);
++}
++
++#ifdef CONFIG_CUDA
++CUdevice cudaDevice;
++CUcontext cudaContext;
++CUmodule cudaModule;
++
++#define cudaFunctionMaxNum 8
++CUfunction cudaFunction[cudaFunctionMaxNum];
++uint32_t cudaFunctionId[cudaFunctionMaxNum];
++uint32_t cudaFunctionNum;
++
++#define cudaEventMaxNum 16
++cudaEvent_t cudaEvent[cudaEventMaxNum];
++uint32_t cudaEventNum;
++
++#define cudaStreamMaxNum 32
++cudaStream_t cudaStream[cudaStreamMaxNum];
++uint32_t cudaStreamNum;
++
++#define cudaError(err) __cudaErrorCheck(err, __LINE__)
++static inline void __cudaErrorCheck(cudaError_t err, const int line)
++{
++	char *str;
++	if ( err != cudaSuccess )
++	{
++		str = (char*)cudaGetErrorString(err);
++		error_report("CUDA Runtime API error = %04d \"%s\" line %d\n", err, str, line);
++	}
++}
++
++
++#define cuError(err)  __cuErrorCheck(err, __LINE__) 
++static inline void __cuErrorCheck(CUresult err, const int line)
++{
++	char *str;
++	if ( err != CUDA_SUCCESS )
++	{   
++		cuGetErrorName(err, (const char**)&str);
++		error_report("CUDA Runtime API error = %04d \"%s\" line %d\n", err, str, line);
++	}   
++}
++
++////////////////////////////////////////////////////////////////////////////////
++///	Module & Execution control (driver API)
++////////////////////////////////////////////////////////////////////////////////
++
++static void qcu_cudaRegisterFatBinary(VirtioQCArg *arg)
++{
++	uint32_t i;
++	pfunc();
++
++	for(i=0; i<cudaFunctionMaxNum; i++)
++		memset(&cudaFunction[i], 0, sizeof(CUfunction));
++
++	for(i=0; i<cudaEventMaxNum; i++)
++		memset(&cudaEvent[i], 0, sizeof(cudaEvent_t));
++
++	for(i=0; i<cudaStreamMaxNum; i++)
++		memset(&cudaStream[i], 0, sizeof(cudaStream_t));
++
++	cuError( cuInit(0) );
++	cuError( cuDeviceGet(&cudaDevice, 0) );
++	cuError( cuCtxCreate(&cudaContext, 0, cudaDevice) );
++
++	cudaFunctionNum = 0;
++	cudaEventNum = 0;
++}
++
++static void qcu_cudaUnregisterFatBinary(VirtioQCArg *arg)
++{
++	uint32_t i;
++	pfunc();
++
++	for(i=0; i<cudaEventMaxNum; i++)
++	{
++		if( cudaEvent[i] != 0 ){
++			cudaError( cudaEventDestroy(cudaEvent[i]));
++		}
++	}
++
++	cuCtxDestroy(cudaContext);
++}
++
++static void qcu_cudaRegisterFunction(VirtioQCArg *arg)
++{
++	void *fatBin;
++	char *functionName;
++	uint32_t funcId;
++	pfunc();
++
++	// assume fatbin size is less equal 4MB
++	fatBin       = gpa_to_hva(arg->pA);
++	functionName = gpa_to_hva(arg->pB);
++	funcId		 = arg->flag;
++
++	ptrace("fatBin= %16p ,name= '%s'\n", fatBin, functionName);
++	cuError( cuModuleLoadData( &cudaModule, fatBin ));
++	cuError( cuModuleGetFunction(&cudaFunction[cudaFunctionNum], 
++				cudaModule, functionName) );
++	cudaFunctionId[cudaFunctionNum] = funcId;
++	cudaFunctionNum++;
++}
++
++static void qcu_cudaLaunch(VirtioQCArg *arg)
++{
++	unsigned int *conf;
++	uint8_t *para;
++	uint32_t funcId, paraNum, paraIdx, funcIdx;
++	void **paraBuf;
++	int i;
++	pfunc();
++
++	conf = gpa_to_hva(arg->pA);
++	para = gpa_to_hva(arg->pB);
++	paraNum = *((uint32_t*)para);
++	funcId = arg->flag;
++	
++	ptrace("paraNum= %u\n", paraNum);
++
++	paraBuf = malloc(paraNum*sizeof(void*));
++	paraIdx = sizeof(uint32_t);
++
++	for(i=0; i<paraNum; i++)
++	{
++		paraBuf[i] = &para[paraIdx+sizeof(uint32_t)];
++		ptrace("arg %d = 0x%llx size= %u byte\n", i, 
++			*(unsigned long long*)paraBuf[i], *(unsigned int*)&para[paraIdx]);
++
++		paraIdx += *((uint32_t*)&para[paraIdx]) + sizeof(uint32_t);
++	}
++
++	for(funcIdx=0; funcIdx<cudaFunctionNum; funcIdx++)
++	{
++		if( cudaFunctionId[funcIdx] == funcId )
++			break;
++	}
++
++	ptrace("grid (%u %u %u) block(%u %u %u) sharedMem(%u)\n", 
++			conf[0], conf[1], conf[2], conf[3], conf[4], conf[5], conf[6]);
++
++
++	cuError( cuLaunchKernel(cudaFunction[funcIdx],
++				conf[0], conf[1], conf[2],
++				conf[3], conf[4], conf[5], 
++				conf[6], NULL, paraBuf, NULL)); // not suppoer stream yeat
++	
++	free(paraBuf);
++}
++
++////////////////////////////////////////////////////////////////////////////////
++/// Memory Management (runtime API)
++////////////////////////////////////////////////////////////////////////////////
++
++static void qcu_cudaMalloc(VirtioQCArg *arg)
++{
++	cudaError_t err;
++	uint32_t count;
++	void* devPtr;
++	pfunc();
++
++	count = arg->flag;
++	cudaError((err = cudaMalloc( &devPtr, count )));
++	arg->cmd = err;
++	arg->pA = (uint64_t)devPtr;
++
++	ptrace("ptr= %p ,count= %u\n", (void*)arg->pA, count);
++}
++
++static void qcu_cudaMemcpy(VirtioQCArg *arg)
++{
++	cudaError_t err;
++	void *dst, *src;
++	uint64_t *gpa_array;
++	uint32_t size, len, i;
++	pfunc();
++
++	if( arg->flag == cudaMemcpyHostToDevice )
++	{
++		dst = (void*)arg->pA;
++		size = arg->pBSize;
++
++		if( size > QCU_KMALLOC_MAX_SIZE)
++		{
++			gpa_array = gpa_to_hva(arg->pB);
++			for(i=0; size>0; i++)
++			{
++				src = gpa_to_hva(gpa_array[i]);
++				len = MIN(size, QCU_KMALLOC_MAX_SIZE);
++				cudaError(( err = cudaMemcpy(dst, src, len, cudaMemcpyHostToDevice)));
++				dst  += len;
++				size -= len;
++			}
++		}
++		else
++		{
++			src = gpa_to_hva(arg->pB);
++			cudaError(( err = cudaMemcpy(dst, src, size, cudaMemcpyHostToDevice)));
++		}
++		arg->cmd = err;
++	}
++	else if(arg->flag == cudaMemcpyDeviceToHost )
++	{
++		src = (void*)arg->pB;
++		size = arg->pASize;
++
++		if( size > QCU_KMALLOC_MAX_SIZE)
++		{
++			gpa_array = gpa_to_hva(arg->pA);
++			for(i=0; size>0; i++)
++			{
++				dst = gpa_to_hva(gpa_array[i]);
++				len = MIN(size, QCU_KMALLOC_MAX_SIZE);
++				cudaError(( err = cudaMemcpy(dst, src, len, cudaMemcpyDeviceToHost)));
++				src  += len;
++				size -= len;
++			}
++		}
++		else
++		{
++			dst = gpa_to_hva(arg->pA);
++			cudaError(( err = cudaMemcpy(dst, src, size, cudaMemcpyDeviceToHost)));
++		}
++		arg->cmd = err;
++	}
++	else if( arg->flag == cudaMemcpyDeviceToDevice )
++	{
++		dst = (void*)arg->pA;
++		src = (void*)arg->pB;
++		size = arg->pBSize;
++		cudaError(( err = cudaMemcpy(dst, src, size, cudaMemcpyDeviceToDevice)));
++		arg->cmd = err;
++	}
++
++	ptrace("size= %u\n", size);
++}
++
++static void qcu_cudaFree(VirtioQCArg *arg)
++{
++	cudaError_t err;
++	void* dst;
++	pfunc();
++
++	dst = (void*)arg->pA;
++	cudaError((err = cudaFree(dst)));
++	arg->cmd = err;
++
++	ptrace("ptr= %16p\n", dst);
++}
++
++////////////////////////////////////////////////////////////////////////////////
++///	Device Management
++////////////////////////////////////////////////////////////////////////////////
++
++static void qcu_cudaGetDevice(VirtioQCArg *arg)
++{
++	cudaError_t err;
++	int device;
++	pfunc();
++
++	cudaError((err = cudaGetDevice( &device )));
++	arg->cmd = err;
++	arg->pA = (uint64_t)device;
++
++	ptrace("device= %d\n", device);
++}
++
++static void qcu_cudaGetDeviceCount(VirtioQCArg *arg)
++{
++	cudaError_t err;
++	int device;
++	pfunc();
++
++	cudaError((err = cudaGetDeviceCount( &device )));
++	arg->cmd = err;
++	arg->pA = (uint64_t)device;
++
++	ptrace("device count=%d\n", device);
++}
++
++static void qcu_cudaSetDevice(VirtioQCArg *arg)
++{
++	cudaError_t err;
++	int device;
++	pfunc();
++
++	device = (int)arg->pA;
++	cudaError((err = cudaSetDevice( device )));
++	arg->cmd = err;
++
++	ptrace("set device= %d\n", device);
++}
++
++static void qcu_cudaGetDeviceProperties(VirtioQCArg *arg)
++{
++	cudaError_t err;
++	struct cudaDeviceProp *prop;
++	int device;
++	pfunc();
++
++	prop = gpa_to_hva(arg->pA);
++	device = (int)arg->pB;
++
++	cudaError((err = cudaGetDeviceProperties( prop, device )));
++	arg->cmd = err;
++
++	ptrace("get prop for device %d\n", device);
++}
++
++static void qcu_cudaDeviceSynchronize(VirtioQCArg *arg)
++{
++	cudaError_t err;
++	pfunc();
++	cudaError((err = cudaDeviceSynchronize()));
++	arg->cmd = err;
++}
++
++static void qcu_cudaDeviceReset(VirtioQCArg *arg)
++{
++	cudaError_t err;
++	pfunc();
++	cudaError((err = cudaDeviceReset()));
++	arg->cmd = err;
++}
++
++////////////////////////////////////////////////////////////////////////////////
++///	Version Management
++////////////////////////////////////////////////////////////////////////////////
++
++static void qcu_cudaDriverGetVersion(VirtioQCArg *arg)
++{
++	cudaError_t err;
++	int version;
++	pfunc();
++
++	cudaError((err = cudaDriverGetVersion( &version )));
++	arg->cmd = err;
++	arg->pA = (uint64_t)version;
++
++	ptrace("driver version= %d\n", version);
++}
++
++static void qcu_cudaRuntimeGetVersion(VirtioQCArg *arg)
++{
++	cudaError_t err;
++	int version;
++	pfunc();
++
++	cudaError((err = cudaRuntimeGetVersion( &version )));
++	arg->cmd = err;
++	arg->pA = (uint64_t)version;
++
++	ptrace("runtime driver= %d\n", version);
++}
++
++////////////////////////////////////////////////////////////////////////////////
++///	Event Management
++////////////////////////////////////////////////////////////////////////////////
++
++static void qcu_cudaEventCreate(VirtioQCArg *arg)
++{
++	cudaError_t err;
++	uint32_t idx;
++	pfunc();
++
++	idx = cudaEventNum;
++	cudaError((err = cudaEventCreate(&cudaEvent[idx])));
++	arg->cmd = err;
++	arg->pA = (uint64_t)idx;
++
++	cudaEventNum++;
++	ptrace("create event %u\n", idx);
++}
++
++static void qcu_cudaEventRecord(VirtioQCArg *arg)
++{
++	cudaError_t err;
++	uint32_t eventIdx;
++	uint32_t streamIdx;
++	pfunc();
++
++	eventIdx  = arg->pA;
++	streamIdx = arg->pB;
++	cudaError((err = cudaEventRecord(cudaEvent[eventIdx], cudaStream[streamIdx])));
++	arg->cmd = err;
++
++	ptrace("event record %u\n", eventIdx);
++}
++
++static void qcu_cudaEventSynchronize(VirtioQCArg *arg)
++{
++	cudaError_t err;
++	uint32_t idx;
++	pfunc();
++
++	idx = arg->pA;
++	cudaError((err = cudaEventSynchronize( cudaEvent[idx] )));
++	arg->cmd = err;
++
++	ptrace("sync event %u\n", idx);
++}
++
++static void qcu_cudaEventElapsedTime(VirtioQCArg *arg)
++{
++	cudaError_t err;
++	uint32_t startIdx;
++	uint32_t endIdx;
++	float ms;
++	pfunc();
++
++	startIdx = arg->pA;
++	endIdx   = arg->pB;
++	cudaError((err = cudaEventElapsedTime(&ms, cudaEvent[startIdx], cudaEvent[endIdx])));
++	arg->cmd = err;
++	memcpy(&arg->flag, &ms, sizeof(float));
++
++	ptrace("event elapse time= %f, start= %u, end= %u\n", 
++			ms, startIdx, endIdx);
++}
++
++static void qcu_cudaEventDestroy(VirtioQCArg *arg)
++{
++	cudaError_t err;
++	uint32_t idx;
++	pfunc();
++
++	idx = arg->pA;
++	cudaError((err = cudaEventDestroy(cudaEvent[idx])));
++	arg->cmd = err;
++	memset(&cudaEvent[idx], 0, sizeof(cudaEvent_t));
++
++	ptrace("destroy event %u\n", idx);
++}
++
++////////////////////////////////////////////////////////////////////////////////
++///	Error Handling
++////////////////////////////////////////////////////////////////////////////////
++
++static void qcu_cudaGetLastError(VirtioQCArg *arg)
++{
++	cudaError_t err;
++	pfunc();
++
++	err =  cudaGetLastError();
++	arg->cmd = err;
++	ptrace("lasr cudaError %d\n", err);
++}
++
++#endif // CONFIG_CUDA
++
++static int qcu_cmd_write(VirtioQCArg *arg)
++{
++	void   *src, *dst;
++	uint64_t *gpa_array;
++	uint32_t size, len, i;
++
++	size = arg->pASize;
++
++	ptrace("szie= %u\n", size);
++
++	if(deviceSpace!=NULL)
++	{
++		free(deviceSpace);	
++	}
++
++	deviceSpaceSize = size;
++	deviceSpace = (char*)malloc(deviceSpaceSize);
++
++	if( size > deviceSpaceSize )
++	{
++		gpa_array = gpa_to_hva(arg->pA);
++		dst = deviceSpace;
++		for(i=0; size>0; i++)
++		{
++			len = MIN(size, QCU_KMALLOC_MAX_SIZE);
++			src = gpa_to_hva(gpa_array[i]);
++			memcpy(dst, src, len);
++			size -= len;
++			dst  += len;
++		}
++	}
++	else
++	{
++		src = gpa_to_hva(arg->pA);
++		memcpy(deviceSpace, src, size);
++	}
++	// checker ------------------------------------------------------------
++/*
++	uint64_t err;
++	if( deviceSpaceSize<32 )
++	{
++		for(i=0; i<deviceSpaceSize; i++)
++		{
++			ptrace("deviceSpace[%lu]= %d\n", i, deviceSpace[i]);
++		}
++	}
++	else
++	{	
++		err = 0;
++		for(i=0; i<deviceSpaceSize; i++)
++		{
++			if( deviceSpace[i] != (i%17)*7 ) err++;
++		}
++		ptrace("error= %llu\n", (unsigned long long)err);
++	}
++	ptrace("\n\n");
++	//---------------------------------------------------------------------
++*/
++	return 0;
++}
++
++static int qcu_cmd_read(VirtioQCArg *arg)
++{
++	void   *src, *dst;
++	uint64_t *gpa_array;
++	uint32_t size, len, i;
++
++	if(deviceSpace==NULL)
++	{
++		return -1;
++	}
++
++	size = arg->pASize;
++
++	ptrace("szie= %u\n", size);
++	
++	if( size > deviceSpaceSize )
++	{
++		gpa_array = gpa_to_hva(arg->pA);
++		src = deviceSpace;
++		for(i=0; size>0; i++)
++		{
++			len = MIN(size, QCU_KMALLOC_MAX_SIZE);
++			dst = gpa_to_hva(gpa_array[i]);
++			memcpy(dst, src, len);
++			size -= len;
++			src  += len;
++		}
++	}
++	else
++	{
++		dst = gpa_to_hva(arg->pA);
++		memcpy(dst, deviceSpace, size);
++	}
++
++	return 0;
++}
++
++static void virtio_qcuda_cmd_handle(VirtIODevice *vdev, VirtQueue *vq)
++{
++	VirtQueueElement elem;
++	VirtioQCArg *arg;
++
++	struct iovec *iov;
++	unsigned int iov_num;
++
++	while( virtqueue_pop(vq, &elem) )
++	{
++		arg = malloc( sizeof(VirtioQCArg));
++
++		iov_num = elem.out_num;
++		iov = g_memdup(elem.out_sg, sizeof(struct iovec) * elem.out_num);
++		iov_to_buf(iov, iov_num, 0, arg, sizeof(VirtioQCArg));
++
++		switch( arg->cmd )
++		{
++			case VIRTQC_CMD_WRITE:
++				qcu_cmd_write(arg);
++				break;
++
++			case VIRTQC_CMD_READ:
++				qcu_cmd_read(arg); 
++				break;
++
++#ifdef CONFIG_CUDA
++			// Module & Execution control (driver API)
++			case VIRTQC_cudaRegisterFatBinary:
++				qcu_cudaRegisterFatBinary(arg);
++				break;
++
++			case VIRTQC_cudaUnregisterFatBinary:
++				qcu_cudaUnregisterFatBinary(arg); 
++				break;
++
++			case VIRTQC_cudaRegisterFunction:
++				qcu_cudaRegisterFunction(arg);
++				break;
++
++			case VIRTQC_cudaLaunch:
++				qcu_cudaLaunch(arg);
++				break;
++
++			// Memory Management (runtime API)
++			case VIRTQC_cudaMalloc:
++				qcu_cudaMalloc(arg);
++				break;
++
++			case VIRTQC_cudaMemcpy:
++				qcu_cudaMemcpy(arg);
++				break;
++
++			case VIRTQC_cudaFree:
++				qcu_cudaFree(arg);
++				break;
++
++			// Device Management (runtime API)
++			case VIRTQC_cudaGetDevice:
++				qcu_cudaGetDevice(arg);
++				break;
++
++			case VIRTQC_cudaGetDeviceCount:
++				qcu_cudaGetDeviceCount(arg);
++				break;
++
++			case VIRTQC_cudaSetDevice:
++				qcu_cudaSetDevice(arg);
++				break;
++
++			case VIRTQC_cudaGetDeviceProperties:
++				qcu_cudaGetDeviceProperties(arg);
++				break;
++
++			case VIRTQC_cudaDeviceSynchronize:
++				qcu_cudaDeviceSynchronize(arg);
++				break;
++
++			case VIRTQC_cudaDeviceReset:
++				qcu_cudaDeviceReset(arg);
++				break;
++
++			// Version Management (runtime API)
++			case VIRTQC_cudaDriverGetVersion:
++				qcu_cudaDriverGetVersion(arg);
++				break;
++
++			case VIRTQC_cudaRuntimeGetVersion:
++				qcu_cudaRuntimeGetVersion(arg);
++				break;
++
++			// Event Management (runtime API)
++			case VIRTQC_cudaEventCreate:
++				qcu_cudaEventCreate(arg);
++				break;
++
++			case VIRTQC_cudaEventRecord:
++				qcu_cudaEventRecord(arg);
++				break;
++
++			case VIRTQC_cudaEventSynchronize:
++				qcu_cudaEventSynchronize(arg);
++				break;
++
++			case VIRTQC_cudaEventElapsedTime:
++				qcu_cudaEventElapsedTime(arg);
++				break;
++
++			case VIRTQC_cudaEventDestroy:
++				qcu_cudaEventDestroy(arg);
++				break;
++
++			// Error Handling (runtime API)
++			case VIRTQC_cudaGetLastError:
++				qcu_cudaGetLastError(arg);
++				break;
++#endif
++			default:
++				error("unknow cmd= %d, rnd= %d\n", arg->cmd, arg->rnd);
++		}
++
++		iov_from_buf(elem.in_sg, elem.in_num, 0, arg, sizeof(VirtioQCArg));
++		virtqueue_push(vq, &elem, sizeof(VirtioQCArg));
++		virtio_notify(vdev, vq);
++
++		g_free(iov);
++		free(arg);
++	}
++}
++
++//####################################################################
++//   class basic callback functions
++//####################################################################
++
++static void virtio_qcuda_device_realize(DeviceState *dev, Error **errp)
++{
++	VirtIODevice *vdev = VIRTIO_DEVICE(dev);
++	VirtIOQC *qcu = VIRTIO_QC(dev);
++	//Error *err = NULL;
++
++	//ptrace("GPU mem size=%"PRIu64"\n", qcu->conf.mem_size);
++
++	virtio_init(vdev, "virtio-qcuda", VIRTIO_ID_QC, sizeof(VirtIOQCConf));
++
++	qcu->vq  = virtio_add_queue(vdev, 1024, virtio_qcuda_cmd_handle);
++}
++
++static uint64_t virtio_qcuda_get_features(VirtIODevice *vdev, uint64_t features, Error **errp)
++{
++	//ptrace("feature=%"PRIu64"\n", features);
++	return features;
++}
++
++/*
++   static void virtio_qcuda_device_unrealize(DeviceState *dev, Error **errp)
++   {
++   ptrace("\n");
++   }
++
++   static void virtio_qcuda_get_config(VirtIODevice *vdev, uint8_t *config)
++   {
++   ptrace("\n");
++   }
++
++   static void virtio_qcuda_set_config(VirtIODevice *vdev, const uint8_t *config)
++   {
++   ptrace("\n");
++   }
++
++   static void virtio_qcuda_reset(VirtIODevice *vdev)
++   {
++   ptrace("\n");
++   }
++
++   static void virtio_qcuda_save_device(VirtIODevice *vdev, QEMUFile *f)
++   {
++   ptrace("\n");
++   }
++
++   static int virtio_qcuda_load_device(VirtIODevice *vdev, QEMUFile *f, int version_id)
++   {
++   ptrace("\n");
++   return 0;
++   }
++
++   static void virtio_qcuda_set_status(VirtIODevice *vdev, uint8_t status)
++   {
++   ptrace("\n");
++   }
++ */
++
++/*
++   get the configure
++ex: -device virtio-qcuda,size=2G,.....
++DEFINE_PROP_SIZE(config name, device struce, element, default value)
++ */
++static Property virtio_qcuda_properties[] = 
++{
++	DEFINE_PROP_SIZE("size", VirtIOQC, conf.mem_size, 0),
++	DEFINE_PROP_END_OF_LIST(),
++};
++
++static void virtio_qcuda_class_init(ObjectClass *klass, void *data)
++{
++	DeviceClass *dc = DEVICE_CLASS(klass);
++	VirtioDeviceClass *vdc = VIRTIO_DEVICE_CLASS(klass);
++
++	dc->props = virtio_qcuda_properties;
++
++	set_bit(DEVICE_CATEGORY_MISC, dc->categories);
++
++	vdc->get_features = virtio_qcuda_get_features;
++
++	vdc->realize = virtio_qcuda_device_realize;
++	/*	
++		vdc->unrealize = virtio_qcuda_device_unrealize;
++
++		vdc->get_config = virtio_qcuda_get_config;
++		vdc->set_config = virtio_qcuda_set_config;
++
++		vdc->save = virtio_qcuda_save_device;
++		vdc->load = virtio_qcuda_load_device;
++
++		vdc->set_status = virtio_qcuda_set_status;
++		vdc->reset = virtio_qcuda_reset;
++	 */	
++}
++
++static void virtio_qcuda_instance_init(Object *obj)
++{
++}
++
++static const TypeInfo virtio_qcuda_device_info = {
++	.name = TYPE_VIRTIO_QC,
++	.parent = TYPE_VIRTIO_DEVICE,
++	.instance_size = sizeof(VirtIOQC),
++	.instance_init = virtio_qcuda_instance_init,
++	.class_init = virtio_qcuda_class_init,
++};
++
++static void virtio_qcuda_register_types(void)
++{
++	type_register_static(&virtio_qcuda_device_info);
++}
++
++type_init(virtio_qcuda_register_types)
+diff -Nur -x .gitignore -x .gitmodules -x pc-bios -x pixman -x roms qemu-2.4.0/hw/virtio/virtio.c ../qCUDA/qcu-device/hw/virtio/virtio.c
+--- qemu-2.4.0/hw/virtio/virtio.c	2015-08-12 03:11:07.000000000 +0800
++++ ../qCUDA/qcu-device/hw/virtio/virtio.c	2015-11-08 16:22:17.941977586 +0800
+@@ -1402,7 +1402,7 @@
+     int i;
+     int nvectors = k->query_nvectors ? k->query_nvectors(qbus->parent) : 0;
+ 
+-    if (nvectors) {
++	if (nvectors) {
+         vdev->vector_queues =
+             g_malloc0(sizeof(*vdev->vector_queues) * nvectors);
+     }
+diff -Nur -x .gitignore -x .gitmodules -x pc-bios -x pixman -x roms qemu-2.4.0/hw/virtio/virtio-pci.c ../qCUDA/qcu-device/hw/virtio/virtio-pci.c
+--- qemu-2.4.0/hw/virtio/virtio-pci.c	2015-08-12 03:11:07.000000000 +0800
++++ ../qCUDA/qcu-device/hw/virtio/virtio-pci.c	2015-11-11 14:40:50.830912796 +0800
+@@ -1054,6 +1054,58 @@
+ };
+ #endif /* CONFIG_VIRTFS */
+ 
++////////////////////////////////////////////////////////////////////////////////
++/// begin of qCUDA
++static void virtio_qcuda_pci_realize(VirtIOPCIProxy *vpci_dev, Error **errp)
++{
++    VirtIOQCPCI *qcu= VIRTIO_QC_PCI(vpci_dev);
++    DeviceState *vdev = DEVICE(&qcu->vdev);
++
++    qdev_set_parent_bus(vdev, BUS(&vpci_dev->bus));
++    object_property_set_bool(OBJECT(vdev), true, "realized", errp);
++}
++
++static Property virtio_qcuda_pci_properties[] = {
++    DEFINE_PROP_BIT("ioeventfd", VirtIOPCIProxy, flags,
++                    VIRTIO_PCI_FLAG_USE_IOEVENTFD_BIT, true),
++    DEFINE_PROP_UINT32("vectors", VirtIOPCIProxy, nvectors, 2),
++    DEFINE_PROP_END_OF_LIST(),
++};
++
++static void virtio_qcuda_pci_class_init(ObjectClass *klass, void *data)
++{
++    DeviceClass *dc = DEVICE_CLASS(klass);
++    PCIDeviceClass *pcidev_k = PCI_DEVICE_CLASS(klass);
++    VirtioPCIClass *k = VIRTIO_PCI_CLASS(klass);
++
++    set_bit(DEVICE_CATEGORY_MISC, dc->categories);
++    dc->props = virtio_qcuda_pci_properties;
++
++    k->realize = virtio_qcuda_pci_realize;
++    pcidev_k->vendor_id = PCI_VENDOR_ID_REDHAT_QUMRANET;
++    pcidev_k->device_id = PCI_DEVICE_ID_VIRTIO_QC;
++	pcidev_k->revision = VIRTIO_PCI_ABI_VERSION;
++   	pcidev_k->class_id  = PCI_CLASS_OTHERS;
++}
++
++static void virtio_qcuda_pci_instance_init(Object *obj)
++{
++    VirtIOQCPCI *dev = VIRTIO_QC_PCI(obj);
++
++    virtio_instance_init_common(obj, &dev->vdev, sizeof(dev->vdev),
++                                TYPE_VIRTIO_QC);
++}
++
++static const TypeInfo virtio_qcuda_pci_info = {
++    .name          = TYPE_VIRTIO_QC_PCI,
++    .parent        = TYPE_VIRTIO_PCI,
++    .instance_size = sizeof(VirtIOQCPCI),
++    .instance_init = virtio_qcuda_pci_instance_init,
++    .class_init    = virtio_qcuda_pci_class_init,
++};
++/// end of qCUDA
++////////////////////////////////////////////////////////////////////////////////
++
+ /*
+  * virtio-pci: This is the PCIDevice which has a virtio-pci-bus.
+  */
+@@ -2241,6 +2293,7 @@
+ #ifdef CONFIG_VIRTFS
+     type_register_static(&virtio_9p_pci_info);
+ #endif
++    type_register_static(&virtio_qcuda_pci_info);
+     type_register_static(&virtio_blk_pci_info);
+     type_register_static(&virtio_scsi_pci_info);
+     type_register_static(&virtio_balloon_pci_info);
+diff -Nur -x .gitignore -x .gitmodules -x pc-bios -x pixman -x roms qemu-2.4.0/hw/virtio/virtio-pci.h ../qCUDA/qcu-device/hw/virtio/virtio-pci.h
+--- qemu-2.4.0/hw/virtio/virtio-pci.h	2015-08-12 03:11:07.000000000 +0800
++++ ../qCUDA/qcu-device/hw/virtio/virtio-pci.h	2015-11-11 14:01:22.822995951 +0800
+@@ -26,6 +26,7 @@
+ #include "hw/virtio/virtio-9p.h"
+ #include "hw/virtio/virtio-input.h"
+ #include "hw/virtio/virtio-gpu.h"
++#include "hw/virtio/virtio-qcuda.h"
+ #ifdef CONFIG_VIRTFS
+ #include "hw/9pfs/virtio-9p.h"
+ #endif
+@@ -45,6 +46,7 @@
+ typedef struct VirtIOInputHIDPCI VirtIOInputHIDPCI;
+ typedef struct VirtIOInputHostPCI VirtIOInputHostPCI;
+ typedef struct VirtIOGPUPCI VirtIOGPUPCI;
++typedef struct VirtIOQCPCI VirtIOQCPCI;
+ 
+ /* virtio-pci-bus */
+ 
+@@ -288,6 +290,19 @@
+     VirtIOGPU vdev;
+ };
+ 
++/*
++ * virtio-qcuda-pci: This extends VirtioPCIProxy.
++ */
++
++#define TYPE_VIRTIO_QC_PCI "virtio-qcuda-pci"
++#define VIRTIO_QC_PCI(obj) \
++        OBJECT_CHECK(VirtIOQCPCI, (obj), TYPE_VIRTIO_QC_PCI)
++
++struct VirtIOQCPCI {
++    VirtIOPCIProxy parent_obj;
++    VirtIOQC vdev;
++};
++
+ /* Virtio ABI version, if we increment this, we break the guest driver. */
+ #define VIRTIO_PCI_ABI_VERSION          0
+ 
+diff -Nur -x .gitignore -x .gitmodules -x pc-bios -x pixman -x roms qemu-2.4.0/include/hw/pci/pci.h ../qCUDA/qcu-device/include/hw/pci/pci.h
+--- qemu-2.4.0/include/hw/pci/pci.h	2015-08-12 03:11:08.000000000 +0800
++++ ../qCUDA/qcu-device/include/hw/pci/pci.h	2015-11-09 23:45:34.995833148 +0800
+@@ -81,6 +81,7 @@
+ #define PCI_DEVICE_ID_VIRTIO_SCSI        0x1004
+ #define PCI_DEVICE_ID_VIRTIO_RNG         0x1005
+ #define PCI_DEVICE_ID_VIRTIO_9P          0x1009
++#define PCI_DEVICE_ID_VIRTIO_QC          0x1012
+ 
+ #define PCI_VENDOR_ID_REDHAT             0x1b36
+ #define PCI_DEVICE_ID_REDHAT_BRIDGE      0x0001
+diff -Nur -x .gitignore -x .gitmodules -x pc-bios -x pixman -x roms qemu-2.4.0/include/hw/virtio/virtio-qcuda.h ../qCUDA/qcu-device/include/hw/virtio/virtio-qcuda.h
+--- qemu-2.4.0/include/hw/virtio/virtio-qcuda.h	1970-01-01 08:00:00.000000000 +0800
++++ ../qCUDA/qcu-device/include/hw/virtio/virtio-qcuda.h	2015-11-09 23:29:46.743866447 +0800
+@@ -0,0 +1,30 @@
++
++#ifndef _QEMU_VIRTIO_HM_H
++#define _QEMU_VIRTIO_HM_H
++
++#include "qemu/queue.h"
++#include "hw/virtio/virtio.h"
++#include "hw/pci/pci.h"
++
++#define TYPE_VIRTIO_QC "virtio-qcuda-device"
++#define VIRTIO_QC(obj)                                        \
++        OBJECT_CHECK(VirtIOQC, (obj), TYPE_VIRTIO_QC)
++
++//#define VIRTIO_ID_QCUDA 69
++
++typedef struct VirtIOQCConf VirtIOQCConf;
++typedef struct VirtIOQC VirtIOQC;
++
++struct VirtIOQCConf
++{
++	uint64_t mem_size;
++};
++
++struct VirtIOQC
++{
++    VirtIODevice parent_obj;
++	VirtIOQCConf conf;
++	VirtQueue *vq;
++};
++
++#endif
