@@ -4,6 +4,7 @@
 #include "hw/virtio/virtio.h"
 #include "hw/virtio/virtio-bus.h"
 #include "hw/virtio/virtio-qcuda.h"
+#include <sys/time.h>
 
 #ifdef CONFIG_CUDA
 #include <cuda.h>
@@ -26,6 +27,7 @@
 
 
 #include "../../../qcu-driver/qcuda_common.h"
+#include "../../../qcu-library/time_measure.h"
 
 #define error(fmt, arg...) \
 	error_report("file %s ,line %d ,ERROR: "fmt, __FILE__, __LINE__, ##arg)
@@ -99,6 +101,7 @@ static void qcu_cudaRegisterFatBinary(VirtioQCArg *arg)
 {
 	uint32_t i;
 	pfunc();
+	time_init();
 
 	for(i=0; i<cudaFunctionMaxNum; i++)
 		memset(&cudaFunction[i], 0, sizeof(CUfunction));
@@ -130,6 +133,7 @@ static void qcu_cudaUnregisterFatBinary(VirtioQCArg *arg)
 	}
 
 	cuCtxDestroy(cudaContext);
+	time_fini();
 }
 
 static void qcu_cudaRegisterFunction(VirtioQCArg *arg)
@@ -157,9 +161,13 @@ static void qcu_cudaLaunch(VirtioQCArg *arg)
 	unsigned int *conf;
 	uint8_t *para;
 	uint32_t funcId, paraNum, paraIdx, funcIdx;
+//	struct timeval timeval_begin, timeval_end;
 	void **paraBuf;
 	int i;
+	
 	pfunc();
+
+//	gettimeofday (&timeval_begin, NULL);
 
 	conf = gpa_to_hva(arg->pA);
 	para = gpa_to_hva(arg->pB);
@@ -196,6 +204,10 @@ static void qcu_cudaLaunch(VirtioQCArg *arg)
 				conf[6], NULL, paraBuf, NULL)); // not suppoer stream yeat
 	
 	free(paraBuf);
+	
+//	gettimeofday (&timeval_end, NULL); 
+//	printf("%u\n", (unsigned int)((timeval_end.tv_sec  - timeval_begin.tv_sec)*1000000 + 
+//					   (timeval_end.tv_usec - timeval_begin.tv_usec)));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -232,22 +244,41 @@ static void qcu_cudaMemcpy(VirtioQCArg *arg)
 
 		if( size > QCU_KMALLOC_MAX_SIZE)
 		{
+			time_begin();
 			gpa_array = gpa_to_hva(arg->pB);
+			time_end(t_Free);
+
 			for(i=0; size>0; i++)
 			{
+				time_begin();
 				src = gpa_to_hva(gpa_array[i]);
+				time_end(t_Free);
+
 				len = MIN(size, QCU_KMALLOC_MAX_SIZE);
+			
+				time_begin();
 				cudaError(( err = cudaMemcpy(dst, src, len, cudaMemcpyHostToDevice)));
+				time_end(t_MemcpyH2D);
+
 				dst  += len;
 				size -= len;
 			}
 		}
 		else
 		{
+			time_begin();
 			src = gpa_to_hva(arg->pB);
+			time_end(t_Free);
+
+			
+			time_begin();
 			cudaError(( err = cudaMemcpy(dst, src, size, cudaMemcpyHostToDevice)));
+			time_end(t_MemcpyH2D);
+
 		}
 		arg->cmd = err;
+		time_count(t_Free);
+		time_count(t_MemcpyH2D);
 	}
 	else if(arg->flag == cudaMemcpyDeviceToHost )
 	{
@@ -256,22 +287,39 @@ static void qcu_cudaMemcpy(VirtioQCArg *arg)
 
 		if( size > QCU_KMALLOC_MAX_SIZE)
 		{
+			time_begin();
 			gpa_array = gpa_to_hva(arg->pA);
+			time_end(t_GetDev);
+
 			for(i=0; size>0; i++)
 			{
+				time_begin();
 				dst = gpa_to_hva(gpa_array[i]);
+				time_end(t_GetDev);
+
 				len = MIN(size, QCU_KMALLOC_MAX_SIZE);
+			
+				time_begin();
 				cudaError(( err = cudaMemcpy(dst, src, len, cudaMemcpyDeviceToHost)));
+				time_end(t_MemcpyD2H);
+
 				src  += len;
 				size -= len;
 			}
 		}
 		else
 		{
+			time_begin();
 			dst = gpa_to_hva(arg->pA);
+			time_end(t_GetDev);
+
+			time_begin();
 			cudaError(( err = cudaMemcpy(dst, src, size, cudaMemcpyDeviceToHost)));
+			time_end(t_MemcpyD2H);
 		}
 		arg->cmd = err;
+		time_count(t_GetDev);
+		time_count(t_MemcpyD2H);
 	}
 	else if( arg->flag == cudaMemcpyDeviceToDevice )
 	{
@@ -281,8 +329,6 @@ static void qcu_cudaMemcpy(VirtioQCArg *arg)
 		cudaError(( err = cudaMemcpy(dst, src, size, cudaMemcpyDeviceToDevice)));
 		arg->cmd = err;
 	}
-
-	ptrace("size= %u\n", size);
 }
 
 static void qcu_cudaFree(VirtioQCArg *arg)
@@ -359,10 +405,13 @@ static void qcu_cudaGetDeviceProperties(VirtioQCArg *arg)
 
 static void qcu_cudaDeviceSynchronize(VirtioQCArg *arg)
 {
-	cudaError_t err;
+//	cudaError_t err;
 	pfunc();
-	cudaError((err = cudaDeviceSynchronize()));
-	arg->cmd = err;
+//	cudaError((err = cudaDeviceSynchronize()));
+	cuCtxSynchronize();
+//	arg->cmd = err;
+	arg->cmd = cudaSuccess;
+
 }
 
 static void qcu_cudaDeviceReset(VirtioQCArg *arg)

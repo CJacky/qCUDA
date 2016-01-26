@@ -26,6 +26,8 @@
 #define ptrace(fmt, arg...)
 #endif
 
+#define QCUDA_IMPLENMENT 1
+
 #define error() printf("###    ERROR: %s %d ##########################################\n", __func__, __LINE__);
 
 void *lib = NULL;
@@ -81,14 +83,20 @@ void close_library()
 
 void** __cudaRegisterFatBinary(void *fatCubin)
 {
+#if QCUDA_IMPLENMENT
 	unsigned int magic = *(unsigned int*)fatCubin;
 	void **fatCubinHandle = malloc(sizeof(void*));
-
+#else
+	void** (*func)(void*);
+	void** ret;
+#endif
 	time_init();
 	open_library();
 
 	pfunc();
 	time_begin();
+
+#if QCUDA_IMPLENMENT	
 	ptrace("    fatCubin= %p\n", fatCubin);
 
 	if( magic == FATBINC_MAGIC)
@@ -107,7 +115,7 @@ void** __cudaRegisterFatBinary(void *fatCubin)
 	}
 	else 
 	{
-#if 0	
+/*	
 magic: __cudaFatFormat.h
 		   header: __cudaFatMAGIC)
 		   __cudaFatCudaBinary *binary = (__cudaFatCudaBinary *)fatCubin;
@@ -115,7 +123,7 @@ magic: __cudaFatFormat.h
 magic: FATBIN_MAGIC
 		   header: fatbinary.h
 		   computeFatBinaryFormat_t binary = (computeFatBinaryFormat_t)fatCubin;
-#endif	 
+*/
 	   ptrace("Unrecognized CUDA FAT MAGIC 0x%x\n", magic);
 	   exit(1);
 	}
@@ -123,22 +131,41 @@ magic: FATBIN_MAGIC
 	cuInit(0);
 	cuDeviceGet(&dev, 0);
 	cuCtxCreate(&ctx, 0, dev);
+#else
+	func = dlsym(lib,"__cudaRegisterFatBinary");
+	ret = (*func)(fatCubin);
+#endif
 
 	// the pointer value is cubin ELF entry point
 	time_end(t_RegFatbin);
+
+#if QCUDA_IMPLENMENT
 	return fatCubinHandle;
+#else
+	return ret;
+#endif
 }
 
 void __cudaUnregisterFatBinary(void **fatCubinHandle)
 {	
+#if QCUDA_IMPLENMENT
+#else
+	void (*func)(void**);
+#endif
+
 	pfunc();
 	time_begin();
 
 	ptrace("%s\n", __func__);
 	ptrace("    handle= %p, value= %p\n", fatCubinHandle, *fatCubinHandle);
 
+#if QCUDA_IMPLENMENT
 	cuCtxDestroy(ctx);
 	free(fatCubinHandle);
+#else
+	func = dlsym(lib, "__cudaUnregisterFatBinary");
+	(*func)(fatCubinHandle);
+#endif
 	time_end(t_UnregFatbin);
 	close_library();
 }
@@ -156,9 +183,16 @@ void __cudaRegisterFunction(
 		int     *wSize
 		)
 {
+
+#if QCUDA_IMPLENMENT
+
+#else
+	void (*func)(void**, const char*, char*, const char*, int, uint3*, uint3*, dim3*, dim3*, int*);
+#endif
 	pfunc();
 	time_begin();
 
+#if QCUDA_IMPLENMENT
 	ptrace("    fatCubinHandle= %p, value= %p\n", fatCubinHandle, *fatCubinHandle);
 	ptrace("    hostFun= %s (%p)\n", hostFun, hostFun);
 	ptrace("    deviceFun= %s (%p)\n", deviceFun, deviceFun);
@@ -202,6 +236,10 @@ void __cudaRegisterFunction(
 	funSize++;
 
 	free(fatBin);
+#else
+	func = dlsym(lib, "__cudaRegisterFunction");
+	(*func)(fatCubinHandle, hostFun, deviceFun, deviceName, thread_limit, tid, bid, bDim, gDim, wSize);
+#endif
 	time_end(t_RegFunc);
 }
 
@@ -211,6 +249,12 @@ cudaError_t cudaConfigureCall(
 		size_t _sharedMem, 
 		cudaStream_t _stream)
 {
+#if QCUDA_IMPLENMENT
+
+#else
+	cudaError_t (*func)(dim3, dim3, size_t, cudaStream_t);
+	cudaError_t err;
+#endif
 	pfunc();
 	time_begin();
 
@@ -220,13 +264,22 @@ cudaError_t cudaConfigureCall(
 	ptrace("    stream= %p\n", (void*)_stream);
 	//ptrace("    size= %lu\n", sizeof(cudaStream_t));
 
+#if QCUDA_IMPLENMENT
 	memcpy(  &gridDim,   &_gridDim, sizeof(dim3));
 	memcpy( &blockDim,  &_blockDim, sizeof(dim3));
 	memcpy(&sharedMem, &_sharedMem, sizeof(size_t));
 	memcpy(   &stream,    &_stream, sizeof(cudaStream_t));
-
+#else
+	func = dlsym(lib, "cudaConfigureCall");
+	err = (*func)(_gridDim, _blockDim, _sharedMem, _stream);
+#endif
 	time_end(t_ConfigCall);
+
+#if QCUDA_IMPLENMENT
 	return cudaSuccess;
+#else
+	return err;
+#endif
 }
 
 cudaError_t cudaSetupArgument(
@@ -234,6 +287,12 @@ cudaError_t cudaSetupArgument(
 		size_t size, 
 		size_t offset)
 {
+#if QCUDA_IMPLENMENT
+#else
+	cudaError_t (*func)(const void*, size_t, size_t);
+	cudaError_t err;
+#endif
+
 	pfunc();
 	time_begin();
 
@@ -250,6 +309,7 @@ cudaError_t cudaSetupArgument(
 	ptrace("size= %lu\n", size);
 	ptrace("offset= %lu\n", offset);
 
+#if QCUDA_IMPLENMENT
 	/*
 	   memcpy(para+offset, arg, size);
 	   paraSize += size;
@@ -257,14 +317,27 @@ cudaError_t cudaSetupArgument(
 
 	para[ paraSize ] = (void*)arg;
 	paraSize++;
+#else
+	func = dlsym(lib, "cudaSetupArgument");
+	err = (*func)(arg, size, offset);
+#endif
 
 	time_end(t_SetArg);
+#if QCUDA_IMPLENMENT
 	return cudaSuccess;
+#else
+	return err;
+#endif
 }
 
 cudaError_t cudaLaunch(const void *func)
 {
+#if QCUDA_IMPLENMENT
 	size_t funIdx;
+#else
+	cudaError_t (*func_L)(const void*);
+	cudaError_t err;
+#endif
 	pfunc();
 	time_begin();
 
@@ -274,6 +347,7 @@ cudaError_t cudaLaunch(const void *func)
 	ptrace("    sharedMem= %lu\n", sharedMem);
 	ptrace("    stream= %p\n", stream);
 
+#if QCUDA_IMPLENMENT
 	for(funIdx=0; funIdx<funSize; funIdx++)
 		if(funPtr[funIdx]==func) break;
 
@@ -283,11 +357,20 @@ cudaError_t cudaLaunch(const void *func)
 	Errchk(cuLaunchKernel(fun[funIdx], 
 				gridDim.x,  gridDim.y,  gridDim.z,
 				blockDim.x, blockDim.y, blockDim.z, 
-				sharedMem, stream, para, NULL));
+				sharedMem, NULL, para, NULL));
 	paraSize = 0;
+#else
+	func_L = dlsym(lib, "cudaLaunch");
+	err = (*func_L)(func);
+#endif
 
 	time_end(t_Launch);
+
+#if QCUDA_IMPLENMENT
 	return cudaSuccess;
+#else
+	return err;
+#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////

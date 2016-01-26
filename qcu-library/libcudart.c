@@ -116,7 +116,8 @@ computeFatBinaryFormat_t binary = (computeFatBinaryFormat_t)fatCubin;
 	send_cmd_to_device( VIRTQC_cudaRegisterFatBinary, NULL);
 
 	// the pointer value is cubin ELF entry point
-	time_end(t_RegFatbin);
+	time_endcount(t_RegFatbin);
+	time_print();
 	return fatCubinHandle;
 }
 
@@ -130,8 +131,9 @@ void __cudaUnregisterFatBinary(void **fatCubinHandle)
 	send_cmd_to_device( VIRTQC_cudaUnregisterFatBinary, NULL);
 
 	free(fatCubinHandle);
-	time_end(t_UnregFatbin);
+	time_endcount(t_UnregFatbin);
 	close_device();
+	time_print();printf("\n");
 }
 
 void __cudaRegisterFunction(
@@ -184,7 +186,8 @@ void __cudaRegisterFunction(
 				(void*)arg.pA, arg.pASize, (void*)arg.pB, arg.pBSize);
 
 	send_cmd_to_device( VIRTQC_cudaRegisterFunction, &arg);
-	time_end(t_RegFunc);
+	time_endcount(t_RegFunc);
+	time_print();
 }
 
 cudaError_t cudaConfigureCall(
@@ -215,7 +218,7 @@ cudaError_t cudaConfigureCall(
 	memset(cudaKernelPara, 0, cudaKernelParaMaxSize);
 	cudaParaSize = sizeof(uint32_t);
 
-	time_end(t_ConfigCall);
+	time_endcount(t_ConfigCall);
 	return cudaSuccess;
 }
 
@@ -244,7 +247,7 @@ cudaError_t cudaSetupArgument(
 
 	(*((uint32_t*)cudaKernelPara))++;
 
-	time_end(t_SetArg);
+	time_endcount(t_SetArg);
 	return cudaSuccess;
 }
 
@@ -261,7 +264,7 @@ cudaError_t cudaLaunch(const void *func)
 
 	send_cmd_to_device( VIRTQC_cudaLaunch, &arg);
 
-	time_end(t_Launch);
+	time_endcount(t_Launch);
 	return cudaSuccess;
 }
 
@@ -283,7 +286,7 @@ cudaError_t cudaMalloc(void** devPtr, size_t size)
 	*devPtr = (void*)arg.pA;
 	ptrace("devPtr= %p\n", (void*)arg.pA);
 
-	time_end(t_Malloc);
+	time_endcount(t_Malloc);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -299,7 +302,7 @@ cudaError_t cudaFree(void* devPtr)
 	send_cmd_to_device( VIRTQC_cudaFree, &arg);
 	ptrace("devPtr= %p\n", (void*)arg.pA);
 
-	time_end(t_Free);
+	time_endcount(t_Free);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -344,9 +347,9 @@ cudaError_t cudaMemcpy(
 	send_cmd_to_device( VIRTQC_cudaMemcpy, &arg);
 
 	if(kind==1){
-		time_end(t_MemcpyH2D);
+		time_endcount(t_MemcpyH2D);
 	}else if(kind==2){
-		time_end(t_MemcpyD2H);
+		time_endcount(t_MemcpyD2H);
 	}
 	return (cudaError_t)arg.cmd;
 }
@@ -366,7 +369,7 @@ cudaError_t cudaGetDevice(int *device)
 	send_cmd_to_device( VIRTQC_cudaGetDevice, &arg);
 	*device = (int)arg.pA;
 
-	time_end(t_GetDev);
+	time_endcount(t_GetDev);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -381,7 +384,7 @@ cudaError_t cudaGetDeviceCount(int *count)
 	send_cmd_to_device( VIRTQC_cudaGetDeviceCount, &arg);
 	*count = (int)arg.pA;
 
-	time_end(t_GetDevCount);
+	time_endcount(t_GetDevCount);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -395,7 +398,7 @@ cudaError_t cudaSetDevice(int device)
 	ptr( arg.pA, device, 0);
 	send_cmd_to_device( VIRTQC_cudaSetDevice, &arg);
 
-	time_end(t_SetDev);
+	time_endcount(t_SetDev);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -411,7 +414,7 @@ cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device)
 	ptr( arg.pB, device, 0);
 	send_cmd_to_device( VIRTQC_cudaGetDeviceProperties, &arg);
 
-	time_end(t_GetDevProp);
+	time_endcount(t_GetDevProp);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -425,7 +428,7 @@ cudaError_t cudaDeviceSynchronize(void)
 
 	send_cmd_to_device( VIRTQC_cudaDeviceSynchronize, &arg);
 
-	time_end(t_DevSync);
+	time_endcount(t_DevSync);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -439,7 +442,7 @@ cudaError_t cudaDeviceReset(void)
 
 	send_cmd_to_device( VIRTQC_cudaDeviceReset, &arg);
 
-	time_end(t_DevReset);
+	time_endcount(t_DevReset);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -458,7 +461,7 @@ cudaError_t cudaDriverGetVersion(int *driverVersion)
 	send_cmd_to_device( VIRTQC_cudaDriverGetVersion, &arg);
 	*driverVersion = (int)arg.pA;
 
-	time_end(t_DriverGetVersion);
+	time_endcount(t_DriverGetVersion);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -473,7 +476,7 @@ cudaError_t cudaRuntimeGetVersion(int *runtimeVersion)
 	send_cmd_to_device( VIRTQC_cudaRuntimeGetVersion, &arg);
 	*runtimeVersion = (uint64_t)arg.pA;
 
-	time_end(t_RuntimeGetVersion);
+	time_endcount(t_RuntimeGetVersion);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -492,7 +495,7 @@ cudaError_t cudaEventCreate(cudaEvent_t *event)
 	send_cmd_to_device( VIRTQC_cudaEventCreate, &arg);
 	*event = (void*)arg.pA;
 
-	time_end(t_EventCreate);
+	time_endcount(t_EventCreate);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -508,7 +511,7 @@ cudaError_t cudaEventRecord	(cudaEvent_t event,	cudaStream_t stream)
 	ptr( arg.pB, stream, 0);
 	send_cmd_to_device( VIRTQC_cudaEventRecord, &arg);
 
-	time_end(t_EventRecord);
+	time_endcount(t_EventRecord);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -523,7 +526,7 @@ cudaError_t cudaEventSynchronize(cudaEvent_t event)
 	ptr( arg.pA, event, 0);
 	send_cmd_to_device( VIRTQC_cudaEventSynchronize, &arg);
 
-	time_end(t_EventSync);
+	time_endcount(t_EventSync);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -541,7 +544,7 @@ cudaError_t cudaEventElapsedTime(float *ms,	cudaEvent_t start, cudaEvent_t end)
 
 	memcpy(ms, &arg.flag, sizeof(float));
 
-	time_end(t_EventElapsedTime);
+	time_endcount(t_EventElapsedTime);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -556,7 +559,7 @@ cudaError_t cudaEventDestroy(cudaEvent_t event)
 	ptr( arg.pA, event, 0);
 	send_cmd_to_device( VIRTQC_cudaEventDestroy, &arg);
 
-	time_end(t_EventDestroy);
+	time_endcount(t_EventDestroy);
 	return (cudaError_t)arg.cmd;
 }
 
@@ -574,7 +577,7 @@ cudaError_t cudaGetLastError(void)
 
 	send_cmd_to_device( VIRTQC_cudaGetLastError, &arg);
 
-	time_end(t_GetLastError);
+	time_endcount(t_GetLastError);
 	return (cudaError_t)arg.cmd;
 }
 
